@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
 #include <exception>
 #include <functional>
 #include <string>

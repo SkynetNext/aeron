@@ -24,7 +24,7 @@
 
 int aeron_env_set(const char *key, const char *val)
 {
-#if defined(WIN32)
+#if defined(_WIN32) || defined(WIN32)
     return _putenv_s(key, val);
 #else
     return setenv(key, val, 1);
@@ -33,7 +33,7 @@ int aeron_env_set(const char *key, const char *val)
 
 int aeron_env_unset(const char *key)
 {
-#if defined(WIN32)
+#if defined(_WIN32) || defined(WIN32)
     return _putenv_s(key, "");
 #else
     return unsetenv(key);

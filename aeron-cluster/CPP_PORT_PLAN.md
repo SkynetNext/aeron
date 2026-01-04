@@ -109,17 +109,16 @@ aeron-archive/src/main/cpp_wrapper/
 ```
 aeron-cluster/src/main/cpp_wrapper/
 ├── CMakeLists.txt
-├── client/
-│   ├── cluster/
-│   │   ├── AeronCluster.h          # 主客户端类
+├── cluster/
+│   ├── client/
+│   │   ├── AeronCluster.h          # 主客户端类 (对应 io.aeron.cluster.client.AeronCluster)
 │   │   ├── ClusterContext.h       # 上下文配置
+│   │   ├── ClusterExceptions.h    # Cluster 异常 (对应 io.aeron.cluster.client.ClusterException)
 │   │   ├── EgressPoller.h         # Egress 消息轮询
 │   │   ├── EgressListener.h        # Egress 监听器接口
-│   │   └── ...
-│   └── util/
-│       └── ClusterExceptions.h    # Cluster 特定异常
-└── service/                        # 服务端（可选，后续阶段）
-    └── ...
+│   │   └── ...                     # 其他 client 类
+│   └── service/                    # 服务端（可选，后续阶段）
+│       └── ...                     # 对应 io.aeron.cluster.service
 ```
 
 #### 1.2 CMakeLists.txt 配置

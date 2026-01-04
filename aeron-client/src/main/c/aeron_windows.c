@@ -15,7 +15,7 @@
  */
 #include "util/aeron_platform.h"
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(AERON_COMPILER_MSVC) || (defined(_WIN32) && defined(__clang__))
 #include "aeron_windows.h"
 #include "util/aeron_error.h"
 

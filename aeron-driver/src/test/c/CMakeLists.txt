@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 Iphlpapi)
 endif ()
 
@@ -32,8 +32,8 @@ set(CMAKE_EXTRA_INCLUDE_FILES)
 
 function(aeron_driver_test name file)
     add_executable(${name} ${file} ${TEST_HEADERS})
-    add_dependencies(${name} gmock)
-    target_link_libraries(${name} aeron_driver gmock_main ${CMAKE_THREAD_LIBS_INIT} ${AERON_LIB_WINSOCK_LIBS})
+    add_dependencies(${name} gmock aeron_static aeron_driver_static)
+    target_link_libraries(${name} aeron_driver_static aeron_static gmock_main ${CMAKE_THREAD_LIBS_INIT} ${AERON_LIB_WINSOCK_LIBS})
     target_compile_definitions(${name} PUBLIC "_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING")
     if (STRUCT_MMSGHDR_TYPE_EXISTS)
         target_compile_definitions(${name} PUBLIC -DHAVE_STRUCT_MMSGHDR)
@@ -113,9 +113,9 @@ if (AERON_UNIT_TESTS)
 
     if ("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
         add_executable(aeronmd_signal_test aeronmd_signal_test.cpp)
-        add_dependencies(aeronmd_signal_test gmock aeronmd)
+        add_dependencies(aeronmd_signal_test gmock aeronmd aeron_static)
         target_compile_definitions(aeronmd_signal_test PUBLIC "_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING")
-        target_link_libraries(aeronmd_signal_test aeron gmock_main ${CMAKE_THREAD_LIBS_INIT} ${AERON_LIB_WINSOCK_LIBS})
+        target_link_libraries(aeronmd_signal_test aeron_static gmock_main ${CMAKE_THREAD_LIBS_INIT} ${AERON_LIB_WINSOCK_LIBS})
         add_test(NAME aeronmd_signal_test COMMAND aeronmd_signal_test $<TARGET_FILE:aeronmd>)
     endif ()
 

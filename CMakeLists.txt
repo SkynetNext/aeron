@@ -41,6 +41,7 @@ endif ()
 
 option(BUILD_AERON_DRIVER "Build Aeron driver" ON)
 option(BUILD_AERON_ARCHIVE_API "Build Aeron Archive API" ON)
+option(BUILD_AERON_CLUSTER_API "Build Aeron Cluster API" ON)
 
 option(C_WARNINGS_AS_ERRORS "Enable warnings as errors for C" OFF)
 option(CXX_WARNINGS_AS_ERRORS "Enable warnings as errors for C++" OFF)
@@ -224,10 +225,10 @@ endif()
 # Project variables, etc.
 
 if (NOT DEFINED GRADLE_WRAPPER)
-    if (MSVC)
-        set(GRADLE_WRAPPER "gradlew.bat" CACHE INTERNAL "Location of the Gradle wrapper script")
+    if (WIN32)
+        set(GRADLE_WRAPPER "${CMAKE_CURRENT_SOURCE_DIR}/gradlew.bat" CACHE INTERNAL "Location of the Gradle wrapper script")
     else ()
-        set(GRADLE_WRAPPER "./gradlew" CACHE INTERNAL "Location of the Gradle wrapper script")
+        set(GRADLE_WRAPPER "${CMAKE_CURRENT_SOURCE_DIR}/gradlew" CACHE INTERNAL "Location of the Gradle wrapper script")
     endif ()
 endif ()
 
@@ -251,6 +252,9 @@ set(AERON_DRIVER_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/aeron-driver/src/main/
 set(AERON_ARCHIVE_WRAPPER_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/aeron-archive/src/main/cpp_wrapper")
 set(AERON_C_ARCHIVE_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/aeron-archive/src/main/c")
 
+# cluster source
+set(AERON_CLUSTER_WRAPPER_SOURCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/aeron-cluster/src/main/cpp_wrapper")
+
 if (AERON_TESTS)
     # client tests
     set(AERON_CLIENT_WRAPPER_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/aeron-client/src/test/cpp_wrapper")
@@ -262,6 +266,9 @@ if (AERON_TESTS)
     # archive tests
     set(AERON_ARCHIVE_WRAPPER_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/aeron-archive/src/test/cpp_wrapper")
     set(AERON_C_ARCHIVE_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/aeron-archive/src/test/c")
+
+    # cluster tests
+    set(AERON_CLUSTER_WRAPPER_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/aeron-cluster/src/test/cpp_wrapper")
 
     set(AERON_SYSTEM_TEST_PATH "${CMAKE_CURRENT_SOURCE_DIR}/aeron-system-tests")
 endif ()
@@ -339,7 +346,7 @@ if (BUILD_AERON_ARCHIVE_API)
         "${CMAKE_CURRENT_SOURCE_DIR}}/aeron-archive/src/main/java/*.java")
 
     add_custom_command(OUTPUT ${AERON_ALL_JAR}
-        COMMAND ${CMAKE_COMMAND} -E env JAVA_HOME=$ENV{JAVA_HOME} BUILD_JAVA_HOME=$ENV{BUILD_JAVA_HOME} BUILD_JAVA_VERSION=$ENV{BUILD_JAVA_VERSION} ${GRADLE_WRAPPER} :aeron-all:clean :aeron-all:assemble --no-daemon -x javadoc --console=plain -q
+        COMMAND ${CMAKE_COMMAND} -E env JAVA_HOME=$ENV{JAVA_HOME} BUILD_JAVA_HOME=$ENV{BUILD_JAVA_HOME} BUILD_JAVA_VERSION=$ENV{BUILD_JAVA_VERSION} ${GRADLE_WRAPPER} :aeron-annotations:classes :aeron-client:classes :aeron-all:assemble --no-daemon -x javadoc --console=plain -q
         DEPENDS ${AERON_ALL_SOURCES}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
         COMMENT "Generating aeron-all jar")
@@ -352,6 +359,13 @@ if (BUILD_AERON_ARCHIVE_API)
         add_subdirectory(${AERON_C_ARCHIVE_TEST_PATH})
     endif ()
 endif (BUILD_AERON_ARCHIVE_API)
+
+if (BUILD_AERON_CLUSTER_API)
+    add_subdirectory(${AERON_CLUSTER_WRAPPER_SOURCE_PATH})
+    if (AERON_TESTS AND EXISTS ${AERON_CLUSTER_WRAPPER_TEST_PATH}/CMakeLists.txt)
+        add_subdirectory(${AERON_CLUSTER_WRAPPER_TEST_PATH})
+    endif ()
+endif (BUILD_AERON_CLUSTER_API)
 ##########################################################
 # doc target
 

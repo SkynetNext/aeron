@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
 #include <array>
 #include <cstdint>
 #include <thread>

@@ -16,12 +16,12 @@
 
 include(CheckSymbolExists)
 
-if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 Iphlpapi)
     set(WSAPOLL_PROTOTYPE_EXISTS True)
 endif ()
 
-if (MSVC)
+if (MSVC OR "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     set(AERON_STATIC_LIB_LINK_OPTS "")
 else()
     # Because dlsym() is used to load strategies.
@@ -171,10 +171,18 @@ target_include_directories(aeron_archive_c_client
     PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>" "$<INSTALL_INTERFACE:include/aeron>"
     PRIVATE ${ARCHIVE_CODEC_TARGET_DIR})
 
-target_link_libraries(
-    aeron_archive_c_client
-    aeron
-    ${CMAKE_THREAD_LIBS_INIT})
+if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+    target_link_libraries(
+        aeron_archive_c_client
+        aeron_static
+        ${CMAKE_THREAD_LIBS_INIT}
+        ${AERON_LIB_WINSOCK_LIBS})
+else()
+    target_link_libraries(
+        aeron_archive_c_client
+        aeron
+        ${CMAKE_THREAD_LIBS_INIT})
+endif()
 
 # static library
 add_library(aeron_archive_c_client_static STATIC ${SOURCE} ${HEADERS})
@@ -189,7 +197,8 @@ target_include_directories(aeron_archive_c_client_static
 target_link_libraries(
     aeron_archive_c_client_static
     aeron_static
-    ${CMAKE_THREAD_LIBS_INIT})
+    ${CMAKE_THREAD_LIBS_INIT}
+    ${AERON_LIB_WINSOCK_LIBS})
 
 if (NOT WIN32)
     set(CMAKE_THREAD_PREFER_PTHREAD TRUE)

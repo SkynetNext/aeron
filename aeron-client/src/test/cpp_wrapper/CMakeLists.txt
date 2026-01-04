@@ -14,6 +14,10 @@
 # limitations under the License.
 #
 
+if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+    set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 Iphlpapi)
+endif ()
+
 set(TEST_HEADERS
     EmbeddedMediaDriver.h
     TestUtil.h)
@@ -22,8 +26,8 @@ include_directories(${AERON_CLIENT_WRAPPER_SOURCE_PATH})
 
 function(aeron_client_native_test name file)
     add_executable(${name} ${file} ${TEST_HEADERS})
-    add_dependencies(${name} gmock)
-    target_link_libraries(${name} aeron_driver gmock_main ${CMAKE_THREAD_LIBS_INIT})
+    add_dependencies(${name} gmock aeron_static aeron_driver_static)
+    target_link_libraries(${name} aeron_static aeron_driver_static gmock_main ${CMAKE_THREAD_LIBS_INIT} ${AERON_LIB_WINSOCK_LIBS})
     target_compile_definitions(${name} PUBLIC "_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING")
     add_test(NAME ${name} COMMAND ${name})
 endfunction()
@@ -31,8 +35,8 @@ endfunction()
 function(aeron_client_wrapper_test name file)
     set(wrapper_name "${name}W")
     add_executable(${wrapper_name} ${file} ${TEST_HEADERS})
-    add_dependencies(${wrapper_name} gmock)
-    target_link_libraries(${wrapper_name} aeron_client_wrapper aeron_driver gmock_main ${CMAKE_THREAD_LIBS_INIT})
+    add_dependencies(${wrapper_name} gmock aeron_static aeron_driver_static)
+    target_link_libraries(${wrapper_name} aeron_client_wrapper aeron_static aeron_driver_static gmock_main ${CMAKE_THREAD_LIBS_INIT} ${AERON_LIB_WINSOCK_LIBS})
     target_compile_definitions(${wrapper_name} PUBLIC "_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING")
     add_test(NAME ${wrapper_name} COMMAND ${wrapper_name})
 endfunction()

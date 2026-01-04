@@ -30,6 +30,7 @@
 #define AERON_DLL_EXPORTS
 
 #include "util/aeron_strutil.h"
+#include "aeron_alloc.h"
 
 void aeron_format_date(char *str, size_t count, int64_t timestamp)
 {
@@ -40,7 +41,11 @@ void aeron_format_date(char *str, size_t count, int64_t timestamp)
     time_t just_seconds = timestamp / 1000;
     int64_t msec_after_sec = timestamp % 1000;
 
+#if defined(_WIN32) || defined(WIN32)
+    localtime_s(&time, &just_seconds);
+#else
     localtime_r(&just_seconds, &time);
+#endif
 
     strftime(time_buffer, sizeof(time_buffer) - 1, "%Y-%m-%d %H:%M:%S.", &time);
     snprintf(msec_buffer, sizeof(msec_buffer) - 1, "%03" PRId64, msec_after_sec);
@@ -178,7 +183,7 @@ int aeron_digit_count(uint32_t value)
     return (int)((value + table[log2]) >> 32);
 }
 
-#if defined(AERON_COMPILER_MSVC)
+#if defined(AERON_COMPILER_MSVC) || (defined(_WIN32) && defined(__clang__))
 
 char *aeron_strndup(const char *value, size_t length)
 {

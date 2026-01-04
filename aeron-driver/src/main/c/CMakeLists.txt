@@ -59,7 +59,7 @@ if (UUID_H_EXISTS)
     add_definitions(-DHAVE_UUID_H)
 endif ()
 
-if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     set(AERON_LIB_WINSOCK_LIBS wsock32 ws2_32 Iphlpapi)
     set(WSAPOLL_PROTOTYPE_EXISTS True)
 endif ()
@@ -426,20 +426,35 @@ target_link_libraries(
     ${CMAKE_THREAD_LIBS_INIT}
     ${AERON_LIB_WINSOCK_LIBS})
 
-target_link_libraries(
-    aeronmd
-    aeron_driver
-    ${CMAKE_DL_LIBS}
-    ${AERON_LIB_BSD_LIBS}
-    ${AERON_LIB_UUID_LIBS}
-    ${AERON_LIB_M_LIBS}
-    ${AERON_LIB_ATOMIC_LIBS}
-    ${CMAKE_THREAD_LIBS_INIT}
-    ${AERON_LIB_WINSOCK_LIBS})
+if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+    target_link_libraries(
+        aeronmd
+        aeron_driver_static
+        aeron_static
+        ${CMAKE_DL_LIBS}
+        ${AERON_LIB_BSD_LIBS}
+        ${AERON_LIB_UUID_LIBS}
+        ${AERON_LIB_M_LIBS}
+        ${AERON_LIB_ATOMIC_LIBS}
+        ${CMAKE_THREAD_LIBS_INIT}
+        ${AERON_LIB_WINSOCK_LIBS})
+else()
+    target_link_libraries(
+        aeronmd
+        aeron_driver
+        ${CMAKE_DL_LIBS}
+        ${AERON_LIB_BSD_LIBS}
+        ${AERON_LIB_UUID_LIBS}
+        ${AERON_LIB_M_LIBS}
+        ${AERON_LIB_ATOMIC_LIBS}
+        ${CMAKE_THREAD_LIBS_INIT}
+        ${AERON_LIB_WINSOCK_LIBS})
+endif()
 
 target_link_libraries(
     aeronmd_s
     aeron_driver_static
+    aeron_static
     ${CMAKE_DL_LIBS}
     ${AERON_LIB_BSD_LIBS}
     ${AERON_LIB_UUID_LIBS}

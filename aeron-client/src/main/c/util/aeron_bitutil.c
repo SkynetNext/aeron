@@ -22,6 +22,10 @@
 #endif
 #endif
 
+#if defined(AERON_COMPILER_MSVC) || (defined(_WIN32) && defined(__clang__))
+#define _CRT_RAND_S
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -34,10 +38,6 @@
 
 #include "util/aeron_bitutil.h"
 #include "util/aeron_platform.h"
-
-#if defined(AERON_COMPILER_MSVC)
-#define _CRT_RAND_S
-#endif
 
 #ifndef HAVE_ARC4RANDOM
 #ifdef HAVE_DEV_URANDOM
@@ -73,7 +73,7 @@ int32_t aeron_randomised_int32(void)
         fprintf(stderr, "Failed to read from aeron_dev_random (%d): %s\n", errno, strerror(errno));
         exit(EXIT_FAILURE);
     }
-#elif defined(AERON_COMPILER_MSVC)
+#elif defined(AERON_COMPILER_MSVC) || (defined(_WIN32) && defined(__clang__))
     uint32_t value;
     if (0 == rand_s(&value))
     {

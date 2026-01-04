@@ -13,29 +13,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#ifndef AERON_CLUSTER_CLIENT_EXCEPTIONS_H
+#define AERON_CLUSTER_CLIENT_EXCEPTIONS_H
 
-#ifndef AERON_WINDOWS_H
-#define AERON_WINDOWS_H
+#include "util/Exceptions.h"
 
-#include "util/aeron_platform.h"
+namespace aeron { namespace cluster { namespace client
+{
 
-#if defined(AERON_COMPILER_GCC)
+AERON_DECLARE_SOURCED_EXCEPTION(ClusterException, ExceptionCategory::EXCEPTION_CATEGORY_ERROR);
 
-#define aeron_erand48 erand48
-#define aeron_srand48 srand48
-#define aeron_drand48 drand48
+#define CLUSTER_MAP_TO_SOURCED_EXCEPTION_AND_THROW(code, message) AERON_MAP_TO_SOURCED_EXCEPTION_AND_THROW_WITH_DEFAULT(code, message, ClusterException)
 
-#elif defined(AERON_COMPILER_MSVC) || (defined(_WIN32) && defined(__clang__))
+#define CLUSTER_MAP_ERRNO_TO_SOURCED_EXCEPTION_AND_THROW CLUSTER_MAP_TO_SOURCED_EXCEPTION_AND_THROW(aeron_errcode(), aeron_errmsg())
 
-#include <stddef.h>
-#include <stdint.h>
-#include <time.h>
+}}}
 
-double aeron_erand48(unsigned short xsubi[3]);
-void aeron_srand48(uint64_t aeron_nano_clock);
-double aeron_drand48();
-void localtime_r(const time_t *timep, struct tm *result);
+#endif // AERON_CLUSTER_CLIENT_EXCEPTIONS_H
 
-#endif
-
-#endif //AERON_WINDOWS_H
