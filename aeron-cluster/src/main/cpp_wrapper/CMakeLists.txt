@@ -83,7 +83,21 @@ SET(HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/AeronCluster.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/EgressPoller.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/EgressListener.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/ControlledEgressListener.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/CredentialsSupplier.h
     ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/ClusterExceptions.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/ClusterEvent.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/EgressListenerExtension.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/ControlledEgressListenerExtension.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/EgressAdapter.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/ControlledEgressAdapter.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/client/IngressSessionDecorator.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/service/ClusterClock.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/service/ClientSession.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/service/ClusteredService.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/service/ClusterTerminationException.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/service/ClusterCounters.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/cluster/service/RecoveryState.h
 )
 
 # header only library

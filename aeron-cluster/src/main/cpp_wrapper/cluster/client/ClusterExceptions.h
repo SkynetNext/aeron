@@ -1,5 +1,5 @@
 /*
- * Copyright 2014-2025 Real Logic Limited.
+ * Copyright 2014-2025 Justin Zhu.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,8 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef AERON_CLUSTER_CLIENT_EXCEPTIONS_H
-#define AERON_CLUSTER_CLIENT_EXCEPTIONS_H
+#pragma once
 
 #include "util/Exceptions.h"
 
@@ -22,12 +21,14 @@ namespace aeron { namespace cluster { namespace client
 {
 
 AERON_DECLARE_SOURCED_EXCEPTION(ClusterException, ExceptionCategory::EXCEPTION_CATEGORY_ERROR);
+AERON_DECLARE_SOURCED_EXCEPTION(ConcurrentConcludeException, ExceptionCategory::EXCEPTION_CATEGORY_ERROR);
+AERON_DECLARE_SOURCED_EXCEPTION(ConfigurationException, ExceptionCategory::EXCEPTION_CATEGORY_ERROR);
+AERON_DECLARE_SOURCED_EXCEPTION(AuthenticationException, ExceptionCategory::EXCEPTION_CATEGORY_ERROR);
+AERON_DECLARE_SOURCED_EXCEPTION(TimeoutException, ExceptionCategory::EXCEPTION_CATEGORY_ERROR);
 
 #define CLUSTER_MAP_TO_SOURCED_EXCEPTION_AND_THROW(code, message) AERON_MAP_TO_SOURCED_EXCEPTION_AND_THROW_WITH_DEFAULT(code, message, ClusterException)
 
 #define CLUSTER_MAP_ERRNO_TO_SOURCED_EXCEPTION_AND_THROW CLUSTER_MAP_TO_SOURCED_EXCEPTION_AND_THROW(aeron_errcode(), aeron_errmsg())
 
 }}}
-
-#endif // AERON_CLUSTER_CLIENT_EXCEPTIONS_H
 
