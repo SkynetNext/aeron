@@ -83,6 +83,8 @@ aeron-archive/src/main/cpp_wrapper/
   - 函数名：camelCase（如 `connect()`）
 - **命名空间**: `namespace aeron::cluster` 或 `namespace aeron::cluster::client`
 - **异常**: 使用 `aeron::util::Exceptions.h` 中定义的异常类型
+- **代码注释**: **必须使用英文**（与 `aeron-client` 保持一致）
+- **文档语言**: 所有技术文档、API 文档、README 等**必须使用英文**
 
 ### 3. 依赖关系
 
@@ -90,6 +92,9 @@ aeron-archive/src/main/cpp_wrapper/
   - `aeron_client_wrapper` (aeron-client cpp_wrapper)
   - `aeron` (C API)
   - `aeron_archive_wrapper` (如果使用 Archive 功能)
+- **测试依赖**:
+  - `googletest` (gtest/gmock) - 用于单元测试和集成测试
+  - `aeron_driver` - 用于嵌入式媒体驱动测试
 - **可选依赖**:
   - SBE codecs（需要从 Java 生成的 codecs 移植或重新生成）
 
@@ -219,21 +224,37 @@ endif (BUILD_AERON_CLUSTER_API)
 | `ClusteredServiceContainer` | `ClusteredServiceContainer` | P2 | 服务容器 |
 | `Cluster` | `Cluster` | P2 | 集群主类 |
 
-### 阶段 4: 测试
+### 阶段 4: 测试移植（1:1 翻译）
+
+**测试框架**: 使用 **GoogleTest (googletest/gmock)**，与 `aeron-client` 保持一致
 
 #### 4.1 单元测试
 
 创建 `aeron-cluster/src/test/cpp_wrapper/` 目录，参考 `aeron-client/src/test/cpp_wrapper/` 的测试结构。
 
-**关键测试**:
-- `AeronClusterTest.cpp`: 基本连接和消息发送
-- `EgressPollerTest.cpp`: Egress 消息轮询
-- `ClusterContextTest.cpp`: 配置测试
+**测试框架配置**:
+- 使用 `gtest/gtest.h` 和 `gmock/gmock.h`
+- 链接 `gmock_main` 库
+- 使用 `testing::Test` 作为测试基类
+- 使用 `TEST_F` 宏定义测试用例
+
+**关键测试**（1:1 翻译 Java 测试）:
+- `AeronClusterTest.cpp`: 基本连接和消息发送（对应 Java `AeronClusterTest.java`）
+- `EgressPollerTest.cpp`: Egress 消息轮询（对应 Java `EgressPollerTest.java`）
+- `ClusterContextTest.cpp`: 配置测试（对应 Java `AeronClusterContextTest.java`）
+- `AuthenticationTest.cpp`: 认证测试（对应 Java `AuthenticationTest.java`）
+- 其他 Java 测试的对应 C++ 版本
+
+**CMakeLists.txt 配置**:
+- 参考 `aeron-client/src/test/cpp_wrapper/CMakeLists.txt`
+- 使用 `aeron_cluster_wrapper_test()` 函数创建测试
+- 链接 `aeron_cluster_wrapper`, `aeron_driver`, `gmock_main`
 
 #### 4.2 集成测试
 
 - 与 Java 版本的互操作性测试
 - 性能对比测试
+- 端到端集群功能测试
 
 ## 实施步骤
 
@@ -266,9 +287,12 @@ endif (BUILD_AERON_CLUSTER_API)
 - [ ] 实现认证支持
 
 ### Step 6: 测试和文档
-- [ ] 编写单元测试
+- [ ] 创建测试目录结构 `aeron-cluster/src/test/cpp_wrapper/`
+- [ ] 配置测试 CMakeLists.txt（使用 googletest，参考 `aeron-client/src/test/cpp_wrapper/CMakeLists.txt`）
+- [ ] 1:1 翻译 Java 单元测试到 C++（使用 googletest/gmock）
+- [ ] 编写集成测试
 - [ ] 编写示例代码
-- [ ] 更新文档
+- [ ] 更新文档（英文）
 
 ## 技术难点和解决方案
 
@@ -363,6 +387,10 @@ cluster->close();
 3. **向后兼容**: API 设计时考虑未来扩展
 4. **文档完善**: 及时更新文档和示例代码
 5. **测试覆盖**: 确保关键功能有充分的测试覆盖
+6. **语言规范**: 
+   - **代码注释必须使用英文**（与 `aeron-client` 保持一致）
+   - **所有技术文档、API 文档、README 等必须使用英文**
+   - 仅此移植计划文档（CPP_PORT_PLAN.md）使用中文
 
 ## 更新日志
 
