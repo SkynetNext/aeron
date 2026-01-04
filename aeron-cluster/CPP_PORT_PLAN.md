@@ -95,8 +95,10 @@ aeron-archive/src/main/cpp_wrapper/
 - **测试依赖**:
   - `googletest` (gtest/gmock) - 用于单元测试和集成测试
   - `aeron_driver` - 用于嵌入式媒体驱动测试
-- **可选依赖**:
-  - SBE codecs（需要从 Java 生成的 codecs 移植或重新生成）
+- **构建时依赖**:
+  - **Java 运行时** - 用于运行 SBE 工具生成 codecs
+  - **SBE jar** - 通过 Gradle 依赖 `libs.sbe` 引入（在 `build.gradle` 中配置）
+  - **Gradle** - 用于调用 SBE 工具生成 C++ codecs
 
 ## 移植计划
 
@@ -201,11 +203,18 @@ endif (BUILD_AERON_CLUSTER_API)
 2. `aeron-cluster/src/main/resources/cluster/aeron-cluster-mark-codecs.xml` - Mark 文件
 3. `aeron-cluster/src/main/resources/cluster/aeron-cluster-node-state-codecs.xml` - 节点状态
 
+**SBE 工具集成方式**：
+- SBE 是 **Java 工具**（不是 C++ 库），通过 Gradle 依赖管理
+- 在 `build.gradle` 中通过 `codecGeneration libs.sbe` 配置引入
+- CMake 通过调用 Gradle 任务或直接调用 Java 的 `SbeTool` 来生成 C++ codecs
+- 参考 `aeron-archive/src/main/c/CMakeLists.txt` 的实现方式
+
 **实施步骤**：
-1. 配置 SBE 工具（参考 `aeron-archive/build.gradle` 中的 `generateCppCodecs` 任务）
-2. 在 CMakeLists.txt 中添加自定义命令，构建时自动生成三个 XML 的 C++ codecs
-3. 将生成的 codecs 集成到项目构建系统
-4. 验证生成的 codecs 与 Java 版本二进制兼容
+1. 在 `build.gradle` 中添加 `generateCppCodecs` 任务（参考 `aeron-archive/build.gradle`）
+2. 在 CMakeLists.txt 中添加 `add_custom_command`，调用 Gradle 任务生成三个 XML 的 C++ codecs
+3. 确保 Java 和 SBE jar 在构建时可用（通过 Gradle 依赖）
+4. 将生成的 codecs 头文件集成到项目构建系统
+5. 验证生成的 codecs 与 Java 版本二进制兼容
 
 **关键 Codecs**（从 `aeron-cluster-codecs.xml` 生成）:
 - `SessionMessageHeaderEncoder/Decoder`, `SessionEventDecoder`, `NewLeaderEventDecoder`
@@ -269,10 +278,11 @@ endif (BUILD_AERON_CLUSTER_API)
 - [ ] 创建 `AeronCluster.h` 骨架
 
 ### Step 3: Codec 处理
-- [ ] 配置 SBE 工具（下载或使用 Gradle 依赖）
-- [ ] 创建 CMake 自定义命令生成 C++ codecs（三个 XML 文件）
-- [ ] 验证生成的 codecs 与 Java 版本兼容
-- [ ] 集成生成的 codecs 到项目构建系统
+- [ ] 在 `build.gradle` 中添加 `generateCppCodecs` 任务（使用 Gradle 依赖 `libs.sbe`）
+- [ ] 在 CMakeLists.txt 中添加 `add_custom_command`，调用 Gradle 任务生成 C++ codecs（三个 XML 文件）
+- [ ] 确保 Java 运行时在构建时可用
+- [ ] 验证生成的 codecs 与 Java 版本二进制兼容
+- [ ] 集成生成的 codecs 头文件到项目构建系统
 
 ### Step 4: 核心功能
 - [ ] 实现 `AeronCluster::connect()`
