@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <algorithm>
+#include <cstdlib>
 
 #include "Aeron.h"
 #include "Publication.h"
@@ -777,44 +778,83 @@ namespace aeron { namespace cluster { namespace client
 
 inline std::int64_t AeronCluster::Configuration::messageTimeoutNs()
 {
-    // TODO: Read from environment variable
+    const char* envValue = std::getenv(MESSAGE_TIMEOUT_PROP_NAME);
+    if (envValue)
+    {
+        try
+        {
+            std::int64_t value = std::stoll(envValue);
+            // Convert from milliseconds to nanoseconds if value is small (< 1000000)
+            if (value < 1000000)
+            {
+                value *= 1000000; // Assume milliseconds
+            }
+            return value;
+        }
+        catch (...)
+        {
+            // Fall through to default
+        }
+    }
     return MESSAGE_TIMEOUT_DEFAULT_NS;
 }
 
 inline std::string AeronCluster::Configuration::ingressEndpoints()
 {
-    // TODO: Read from environment variable
-    return "";
+    const char* envValue = std::getenv(INGRESS_ENDPOINTS_PROP_NAME);
+    return envValue ? std::string(envValue) : "";
 }
 
 inline std::string AeronCluster::Configuration::ingressChannel()
 {
-    // TODO: Read from environment variable
-    return "";
+    const char* envValue = std::getenv(INGRESS_CHANNEL_PROP_NAME);
+    return envValue ? std::string(envValue) : "";
 }
 
 inline int AeronCluster::Configuration::ingressStreamId()
 {
-    // TODO: Read from environment variable
+    const char* envValue = std::getenv(INGRESS_STREAM_ID_PROP_NAME);
+    if (envValue)
+    {
+        try
+        {
+            return std::stoi(envValue);
+        }
+        catch (...)
+        {
+            // Fall through to default
+        }
+    }
     return INGRESS_STREAM_ID_DEFAULT;
 }
 
 inline std::string AeronCluster::Configuration::egressChannel()
 {
-    // TODO: Read from environment variable
-    return "";
+    const char* envValue = std::getenv(EGRESS_CHANNEL_PROP_NAME);
+    return envValue ? std::string(envValue) : "";
 }
 
 inline int AeronCluster::Configuration::egressStreamId()
 {
-    // TODO: Read from environment variable
+    const char* envValue = std::getenv(EGRESS_STREAM_ID_PROP_NAME);
+    if (envValue)
+    {
+        try
+        {
+            return std::stoi(envValue);
+        }
+        catch (...)
+        {
+            // Fall through to default
+        }
+    }
     return EGRESS_STREAM_ID_DEFAULT;
 }
 
 inline std::string AeronCluster::Configuration::clientName()
 {
-    // TODO: Read from environment variable
-    return "";
+    const char* envValue = std::getenv(CLIENT_NAME_PROP_NAME);
+    return envValue ? std::string(envValue) : "";
 }
 
 // Context implementation
@@ -1055,7 +1095,12 @@ void AeronCluster::Context::conclude()
         m_egressChannel = egressChannelUri.toString();
     }
 
-    // TODO: Check client name length against MAX_CLIENT_NAME_LENGTH
+    static constexpr int MAX_CLIENT_NAME_LENGTH = 100;
+    if (m_clientName.length() > MAX_CLIENT_NAME_LENGTH)
+    {
+        throw ConfigurationException(
+            "AeronCluster.Context.clientName length must be <= " + std::to_string(MAX_CLIENT_NAME_LENGTH), SOURCEINFO);
+    }
 
     if (!m_aeron)
     {
@@ -1372,10 +1417,16 @@ inline void AeronCluster::AsyncConnect::awaitPublicationConnected()
 inline void AeronCluster::AsyncConnect::prepareConnectRequest(const std::string& responseChannel)
 {
     m_correlationId = m_ctx->aeron()->nextCorrelationId();
-    const std::vector<std::uint8_t>& encodedCredentials = m_ctx->credentialsSupplier()->encodedCredentials();
+    auto credentialsPair = m_ctx->credentialsSupplier()->encodedCredentials();
+    std::vector<std::uint8_t> encodedCredentials;
+    if (credentialsPair.first && credentialsPair.second > 0)
+    {
+        encodedCredentials.assign(credentialsPair.first, credentialsPair.first + credentialsPair.second);
+    }
 
-    // TODO: Implement version info formatting
-    std::string clientInfo = "name=" + m_ctx->clientName() + " version_info_placeholder";
+    // Format version info: "version=<version> commit=<commit>"
+    // For C++ version, we use a placeholder since version info is typically generated at build time
+    std::string clientInfo = "name=" + m_ctx->clientName() + " version=1.50.0 commit=unknown";
 
     SessionConnectRequest sessionConnectRequestEncoder;
     sessionConnectRequestEncoder
@@ -1385,7 +1436,10 @@ inline void AeronCluster::AsyncConnect::prepareConnectRequest(const std::string&
         .version(Configuration::PROTOCOL_SEMANTIC_VERSION)
         .responseChannel(responseChannel);
     
-    sessionConnectRequestEncoder.putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+    if (!encodedCredentials.empty())
+    {
+        sessionConnectRequestEncoder.putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+    }
     sessionConnectRequestEncoder.clientInfo(clientInfo);
 
     m_messageLength = MessageHeaderEncoder::encodedLength() + sessionConnectRequestEncoder.encodedLength();
@@ -1415,7 +1469,16 @@ inline void AeronCluster::AsyncConnect::pollResponse()
         {
             m_correlationId = aeron::NULL_VALUE;
             m_clusterSessionId = m_egressPoller->clusterSessionId();
-            prepareChallengeResponse(m_ctx->credentialsSupplier()->onChallenge(m_egressPoller->encodedChallenge()));
+            const auto& challenge = m_egressPoller->encodedChallenge();
+            auto responsePair = m_ctx->credentialsSupplier()->onChallenge(
+                challenge.empty() ? nullptr : challenge.data(), 
+                static_cast<std::uint32_t>(challenge.size()));
+            std::vector<std::uint8_t> responseData;
+            if (responsePair.first && responsePair.second > 0)
+            {
+                responseData.assign(responsePair.first, responsePair.first + responsePair.second);
+            }
+            prepareChallengeResponse(responseData);
             return;
         }
 
@@ -1457,7 +1520,10 @@ inline void AeronCluster::AsyncConnect::prepareChallengeResponse(const std::vect
         .correlationId(m_correlationId)
         .clusterSessionId(m_clusterSessionId);
     
-    challengeResponseEncoder.putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+    if (!encodedCredentials.empty())
+    {
+        challengeResponseEncoder.putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+    }
 
     m_messageLength = MessageHeaderEncoder::encodedLength() + challengeResponseEncoder.encodedLength();
 
@@ -1516,10 +1582,10 @@ inline std::shared_ptr<AeronCluster> AeronCluster::AsyncConnect::concludeConnect
 {
     if (m_ctx->newLeaderTimeoutNs() == aeron::NULL_VALUE)
     {
-        // TODO: Replace with C++ equivalent of ConsensusModule.Configuration.LEADER_HEARTBEAT_TIMEOUT_DEFAULT_NS
-        std::int64_t leaderHeartbeatTimeoutDefaultNs = 10000000000LL; // 10 seconds
+        // Default leader heartbeat timeout is 10 seconds (10 * 1000 * 1000 * 1000 nanoseconds)
+        static constexpr std::int64_t LEADER_HEARTBEAT_TIMEOUT_DEFAULT_NS = 10LL * 1000 * 1000 * 1000;
         m_ctx->newLeaderTimeoutNs(2 * (m_leaderHeartbeatTimeoutNs != aeron::NULL_VALUE ?
-            m_leaderHeartbeatTimeoutNs : leaderHeartbeatTimeoutDefaultNs));
+            m_leaderHeartbeatTimeoutNs : LEADER_HEARTBEAT_TIMEOUT_DEFAULT_NS));
     }
 
     std::shared_ptr<AeronCluster> aeronCluster = std::shared_ptr<AeronCluster>(new AeronCluster(

@@ -1,0 +1,50 @@
+#pragma once
+#include <chrono>
+#include "../service/ClusterClock.h"
+
+namespace aeron { namespace cluster
+{
+
+/**
+ * A ClusterClock implemented by calling System.currentTimeMillis().
+ */
+class MillisecondClusterClock : public service::ClusterClock
+{
+public:
+    std::chrono::milliseconds::rep timeUnit() const override
+    {
+        return 1; // milliseconds
+    }
+
+    std::int64_t time() override
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    std::int64_t timeMillis() const override
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    std::int64_t timeMicros() const override
+    {
+        return std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    std::int64_t timeNanos() const override
+    {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    std::int64_t convertToNanos(std::int64_t time) const override
+    {
+        return std::chrono::milliseconds(time).count() * 1000000;
+    }
+};
+
+}}
+
