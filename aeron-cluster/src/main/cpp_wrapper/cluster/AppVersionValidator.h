@@ -32,5 +32,8 @@ public:
     }
 };
 
+// Static member definition
+inline const AppVersionValidator AppVersionValidator::SEMANTIC_VERSIONING_VALIDATOR{};
+
 }}
 

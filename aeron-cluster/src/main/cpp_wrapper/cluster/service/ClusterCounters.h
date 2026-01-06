@@ -239,14 +239,13 @@ public:
         std::string versionInfo = " version=" + version + " commit=" + gitSha;
         index += tempBuffer.putStringWithoutLength(index, versionInfo);
 
-        return aeron->addCounter(
+        std::string label = tempBuffer.getStringWithoutLength(keyLength, static_cast<std::size_t>(index - keyLength));
+        std::int64_t registrationId = aeron->addCounter(
             AeronCounters::CLUSTER_CLUSTERED_SERVICE_ERROR_COUNT_TYPE_ID,
-            tempBuffer,
-            0,
+            tempBuffer.buffer(),
             keyLength,
-            tempBuffer,
-            keyLength,
-            index - keyLength);
+            label);
+        return aeron->findCounter(registrationId);
     }
 };
 

@@ -130,7 +130,16 @@ public:
      * @param clusterId to which the allocated counter belongs.
      * @return the control toggle counter or return null if not found.
      */
-    static std::shared_ptr<AtomicCounter> findControlToggle(CountersReader& counters, std::int32_t clusterId);
+    static std::shared_ptr<AtomicCounter> findControlToggle(CountersReader& counters, std::int32_t clusterId)
+    {
+        const std::int32_t counterId = ClusterCounters::find(counters, CONTROL_TOGGLE_TYPE_ID, clusterId);
+        if (Aeron::NULL_VALUE != counterId)
+        {
+            return std::make_shared<AtomicCounter>(counters.valuesBuffer(), counterId, nullptr);
+        }
+
+        return nullptr;
+    }
 };
 
 }}

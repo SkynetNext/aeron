@@ -396,6 +396,11 @@ namespace AeronCounters
      * The type id of the {@link Counter} used for keeping track of the Cluster leadership term id.
      */
     const std::int32_t CLUSTER_LEADERSHIP_TERM_ID_TYPE_ID = 239;
+
+    /**
+     * Counter type id for cluster session.
+     */
+    const std::int32_t CLUSTER_SESSION_TYPE_ID = 241;
 }
 
 }

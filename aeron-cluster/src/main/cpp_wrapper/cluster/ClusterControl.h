@@ -1,8 +1,10 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <filesystem>
 #include "Aeron.h"
 #include "AeronCounters.h"
+#include "CncFileReader.h"
 #include "../client/ClusterExceptions.h"
 #include "../service/ClusterCounters.h"
 #include "concurrent/AtomicCounter.h"
@@ -162,7 +164,19 @@ public:
      * @param cncFile for the counters.
      * @return a CountersReader over the provided CnC file.
      */
-    static std::shared_ptr<CountersReader> mapCounters(const std::string& cncFile);
+    static std::shared_ptr<CountersReader> mapCounters(const std::string& cncFile)
+    {
+        // Extract directory from file path
+        std::filesystem::path filePath(cncFile);
+        std::string directory = filePath.parent_path().string();
+        if (directory.empty())
+        {
+            directory = ".";
+        }
+        
+        CncFileReader cncFileReader = CncFileReader::mapExisting(directory.c_str());
+        return std::make_shared<CountersReader>(cncFileReader.countersReader());
+    }
 
     /**
      * Find the control toggle counter or return null if not found.
@@ -171,7 +185,16 @@ public:
      * @param clusterId to which the allocated counter belongs.
      * @return the control toggle counter or return null if not found.
      */
-    static std::shared_ptr<AtomicCounter> findControlToggle(CountersReader& counters, std::int32_t clusterId);
+    static std::shared_ptr<AtomicCounter> findControlToggle(CountersReader& counters, std::int32_t clusterId)
+    {
+        const std::int32_t counterId = ClusterCounters::find(counters, CONTROL_TOGGLE_TYPE_ID, clusterId);
+        if (Aeron::NULL_VALUE != counterId)
+        {
+            return std::make_shared<AtomicCounter>(counters.valuesBuffer(), counterId, nullptr);
+        }
+
+        return nullptr;
+    }
 };
 
 }}

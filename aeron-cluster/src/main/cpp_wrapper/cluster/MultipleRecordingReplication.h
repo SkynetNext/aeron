@@ -121,5 +121,202 @@ private:
     EventListener* m_eventListener = nullptr;
 };
 
-}}
+// Implementation
+inline MultipleRecordingReplication::MultipleRecordingReplication(
+    std::shared_ptr<AeronArchive> archive,
+    std::int32_t srcControlStreamId,
+    const std::string& srcControlChannel,
+    const std::string& replicationChannel,
+    const std::string& srcResponseChannel,
+    std::int64_t replicationProgressTimeoutNs,
+    std::int64_t replicationProgressIntervalNs) :
+    m_archive(archive),
+    m_srcControlStreamId(srcControlStreamId),
+    m_srcControlChannel(srcControlChannel),
+    m_replicationChannel(replicationChannel),
+    m_srcResponseChannel(srcResponseChannel),
+    m_progressTimeoutNs(replicationProgressTimeoutNs),
+    m_progressIntervalNs(replicationProgressIntervalNs)
+{
+}
 
+inline std::unique_ptr<MultipleRecordingReplication> MultipleRecordingReplication::newInstance(
+    std::shared_ptr<AeronArchive> archive,
+    std::int32_t srcControlStreamId,
+    const std::string& srcControlChannel,
+    const std::string& replicationChannel,
+    std::int64_t replicationProgressTimeoutNs,
+    std::int64_t replicationProgressIntervalNs)
+{
+    return std::unique_ptr<MultipleRecordingReplication>(
+        new MultipleRecordingReplication(
+            archive,
+            srcControlStreamId,
+            srcControlChannel,
+            replicationChannel,
+            "", // srcResponseChannel is empty
+            replicationProgressTimeoutNs,
+            replicationProgressIntervalNs));
+}
+
+inline std::unique_ptr<MultipleRecordingReplication> MultipleRecordingReplication::newInstance(
+    std::shared_ptr<AeronArchive> archive,
+    std::int32_t srcControlStreamId,
+    const std::string& srcControlChannel,
+    const std::string& replicationChannel,
+    const std::string& srcResponseChannel,
+    std::int64_t replicationProgressTimeoutNs,
+    std::int64_t replicationProgressIntervalNs)
+{
+    return std::unique_ptr<MultipleRecordingReplication>(
+        new MultipleRecordingReplication(
+            archive,
+            srcControlStreamId,
+            srcControlChannel,
+            replicationChannel,
+            srcResponseChannel,
+            replicationProgressTimeoutNs,
+            replicationProgressIntervalNs));
+}
+
+inline MultipleRecordingReplication::~MultipleRecordingReplication()
+{
+    close();
+}
+
+inline void MultipleRecordingReplication::addRecording(
+    std::int64_t srcRecordingId,
+    std::int64_t dstRecordingId,
+    std::int64_t stopPosition)
+{
+    m_recordingsPending.emplace_back(srcRecordingId, dstRecordingId, stopPosition);
+}
+
+inline std::int32_t MultipleRecordingReplication::poll(std::int64_t nowNs)
+{
+    if (isComplete())
+    {
+        return 0;
+    }
+
+    std::int32_t workDone = 0;
+
+    if (!m_recordingReplication)
+    {
+        replicateCurrentSnapshot(nowNs);
+        workDone++;
+    }
+    else
+    {
+        m_recordingReplication->poll(nowNs);
+        if (m_recordingReplication->hasReplicationEnded())
+        {
+            const RecordingInfo& pending = m_recordingsPending[m_recordingCursor];
+
+            onReplicationEnded(
+                m_srcControlChannel,
+                pending.srcRecordingId,
+                m_recordingReplication->recordingId(),
+                m_recordingReplication->position(),
+                m_recordingReplication->hasSynced());
+
+            if (m_recordingReplication->hasSynced())
+            {
+                m_recordingsCompleted[pending.srcRecordingId] = m_recordingReplication->recordingId();
+                m_recordingCursor++;
+
+                m_recordingReplication.reset();
+            }
+            else
+            {
+                m_recordingReplication.reset();
+
+                replicateCurrentSnapshot(nowNs);
+            }
+
+            workDone++;
+        }
+    }
+
+    return workDone;
+}
+
+inline std::int64_t MultipleRecordingReplication::completedDstRecordingId(std::int64_t srcRecordingId) const
+{
+    auto it = m_recordingsCompleted.find(srcRecordingId);
+    if (it != m_recordingsCompleted.end())
+    {
+        return it->second;
+    }
+    return aeron::NULL_VALUE;
+}
+
+inline void MultipleRecordingReplication::onSignal(
+    std::int64_t correlationId,
+    std::int64_t recordingId,
+    std::int64_t position,
+    RecordingSignal signal)
+{
+    if (m_recordingReplication)
+    {
+        m_recordingReplication->onSignal(correlationId, recordingId, position, signal);
+    }
+}
+
+inline bool MultipleRecordingReplication::isComplete() const
+{
+    return m_recordingCursor >= static_cast<std::int32_t>(m_recordingsPending.size());
+}
+
+inline void MultipleRecordingReplication::close()
+{
+    if (m_recordingReplication)
+    {
+        m_recordingReplication->close();
+        m_recordingReplication.reset();
+    }
+}
+
+inline void MultipleRecordingReplication::setEventListener(EventListener* eventListener)
+{
+    m_eventListener = eventListener;
+}
+
+inline void MultipleRecordingReplication::replicateCurrentSnapshot(std::int64_t nowNs)
+{
+    const RecordingInfo& recordingInfo = m_recordingsPending[m_recordingCursor];
+    ReplicationParams replicationParams;
+    replicationParams.dstRecordingId(recordingInfo.dstRecordingId)
+        .stopPosition(recordingInfo.stopPosition)
+        .replicationChannel(m_replicationChannel)
+        .replicationSessionId(static_cast<std::int32_t>(m_archive->context().aeron()->nextCorrelationId()));
+    
+    // Note: srcResponseChannel is not directly supported in ReplicationParams C++ API
+    // It may need to be set via liveDestination or handled differently
+
+    m_recordingReplication = std::make_unique<RecordingReplication>(
+        m_archive,
+        recordingInfo.srcRecordingId,
+        m_srcControlChannel,
+        m_srcControlStreamId,
+        replicationParams,
+        m_progressTimeoutNs,
+        m_progressIntervalNs,
+        nowNs);
+}
+
+inline void MultipleRecordingReplication::onReplicationEnded(
+    const std::string& srcArchiveControlChannel,
+    std::int64_t srcRecordingId,
+    std::int64_t dstRecordingId,
+    std::int64_t position,
+    bool hasSynced)
+{
+    if (m_eventListener)
+    {
+        m_eventListener->onReplicationEnded(
+            srcArchiveControlChannel, srcRecordingId, dstRecordingId, position, hasSynced);
+    }
+}
+
+}}

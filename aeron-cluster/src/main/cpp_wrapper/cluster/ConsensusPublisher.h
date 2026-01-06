@@ -422,9 +422,416 @@ inline void ConsensusPublisher::commitPosition(
     while (--attempts > 0);
 }
 
-// Note: Other methods (newLeadershipTerm, appendPosition, catchupPosition, etc.) 
-// follow similar patterns and can be implemented following the same structure.
-// For brevity, only key methods are shown above.
+inline void ConsensusPublisher::newLeadershipTerm(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t logLeadershipTermId,
+    std::int64_t nextLeadershipTermId,
+    std::int64_t nextTermBaseLogPosition,
+    std::int64_t nextLogPosition,
+    std::int64_t leadershipTermId,
+    std::int64_t termBaseLogPosition,
+    std::int64_t logPosition,
+    std::int64_t commitPosition,
+    std::int64_t leaderRecordingId,
+    std::int64_t timestamp,
+    std::int32_t leaderMemberId,
+    std::int32_t logSessionId,
+    std::int32_t appVersion,
+    bool isStartup)
+{
+    if (!publication)
+    {
+        return;
+    }
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + NewLeadershipTerm::SBE_BLOCK_LENGTH);
+
+    int attempts = SEND_ATTEMPTS;
+    do
+    {
+        const std::int64_t position = publication->tryClaim(length, m_bufferClaim);
+        if (position > 0)
+        {
+            m_newLeadershipTermEncoder
+                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .logLeadershipTermId(logLeadershipTermId)
+                .nextLeadershipTermId(nextLeadershipTermId)
+                .nextTermBaseLogPosition(nextTermBaseLogPosition)
+                .nextLogPosition(nextLogPosition)
+                .leadershipTermId(leadershipTermId)
+                .termBaseLogPosition(termBaseLogPosition)
+                .logPosition(logPosition)
+                .leaderRecordingId(leaderRecordingId)
+                .timestamp(timestamp)
+                .leaderMemberId(leaderMemberId)
+                .logSessionId(logSessionId)
+                .appVersion(appVersion)
+                .isStartup(isStartup ? BooleanType::TRUE : BooleanType::FALSE)
+                .commitPosition(commitPosition);
+
+            m_bufferClaim.commit();
+            return;
+        }
+
+        checkResult(position, *publication);
+    }
+    while (--attempts > 0);
+}
+
+inline bool ConsensusPublisher::appendPosition(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t leadershipTermId,
+    std::int64_t logPosition,
+    std::int32_t followerMemberId,
+    std::int16_t flags)
+{
+    if (!publication)
+    {
+        return false;
+    }
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + AppendPosition::SBE_BLOCK_LENGTH);
+
+    int attempts = SEND_ATTEMPTS;
+    do
+    {
+        const std::int64_t position = publication->tryClaim(length, m_bufferClaim);
+        if (position > 0)
+        {
+            m_appendPositionEncoder
+                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .leadershipTermId(leadershipTermId)
+                .logPosition(logPosition)
+                .followerMemberId(followerMemberId)
+                .flags(flags);
+
+            m_bufferClaim.commit();
+            return true;
+        }
+
+        checkResult(position, *publication);
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+inline bool ConsensusPublisher::catchupPosition(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t leadershipTermId,
+    std::int64_t logPosition,
+    std::int32_t followerMemberId,
+    const std::string& catchupEndpoint)
+{
+    if (!publication)
+    {
+        return false;
+    }
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() +
+        CatchupPosition::SBE_BLOCK_LENGTH +
+        CatchupPosition::catchupEndpointHeaderLength() +
+        catchupEndpoint.length());
+
+    int attempts = SEND_ATTEMPTS;
+    do
+    {
+        const std::int64_t position = publication->tryClaim(length, m_bufferClaim);
+        if (position > 0)
+        {
+            m_catchupPositionEncoder
+                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .leadershipTermId(leadershipTermId)
+                .logPosition(logPosition)
+                .followerMemberId(followerMemberId)
+                .catchupEndpoint(catchupEndpoint);
+
+            m_bufferClaim.commit();
+            return true;
+        }
+
+        checkResult(position, *publication);
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+inline bool ConsensusPublisher::stopCatchup(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t leadershipTermId,
+    std::int32_t followerMemberId)
+{
+    if (!publication)
+    {
+        return false;
+    }
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + StopCatchup::SBE_BLOCK_LENGTH);
+
+    int attempts = SEND_ATTEMPTS;
+    do
+    {
+        const std::int64_t position = publication->tryClaim(length, m_bufferClaim);
+        if (position > 0)
+        {
+            m_stopCatchupEncoder
+                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .leadershipTermId(leadershipTermId)
+                .followerMemberId(followerMemberId);
+
+            m_bufferClaim.commit();
+            return true;
+        }
+
+        checkResult(position, *publication);
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+inline bool ConsensusPublisher::terminationPosition(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t leadershipTermId,
+    std::int64_t logPosition)
+{
+    if (!publication)
+    {
+        return false;
+    }
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + TerminationPosition::SBE_BLOCK_LENGTH);
+
+    int attempts = SEND_ATTEMPTS;
+    do
+    {
+        const std::int64_t position = publication->tryClaim(length, m_bufferClaim);
+        if (position > 0)
+        {
+            m_terminationPositionEncoder
+                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .leadershipTermId(leadershipTermId)
+                .logPosition(logPosition);
+
+            m_bufferClaim.commit();
+            return true;
+        }
+
+        checkResult(position, *publication);
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+inline bool ConsensusPublisher::terminationAck(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t leadershipTermId,
+    std::int64_t logPosition,
+    std::int32_t memberId)
+{
+    if (!publication)
+    {
+        return false;
+    }
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + TerminationAck::SBE_BLOCK_LENGTH);
+
+    int attempts = SEND_ATTEMPTS;
+    do
+    {
+        const std::int64_t position = publication->tryClaim(length, m_bufferClaim);
+        if (position > 0)
+        {
+            m_terminationAckEncoder
+                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .leadershipTermId(leadershipTermId)
+                .logPosition(logPosition)
+                .memberId(memberId);
+
+            m_bufferClaim.commit();
+            return true;
+        }
+
+        checkResult(position, *publication);
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+inline bool ConsensusPublisher::backupQuery(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t correlationId,
+    std::int32_t responseStreamId,
+    std::int32_t version,
+    const std::string& responseChannel,
+    const std::vector<std::uint8_t>& encodedCredentials)
+{
+    if (!publication)
+    {
+        return false;
+    }
+
+    m_backupQueryEncoder
+        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .correlationId(correlationId)
+        .responseStreamId(responseStreamId)
+        .version(version)
+        .responseChannel(responseChannel)
+        .putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + m_backupQueryEncoder.encodedLength());
+    return sendPublication(publication, m_buffer, length);
+}
+
+inline bool ConsensusPublisher::backupResponse(
+    ClusterSession& session,
+    std::int32_t commitPositionCounterId,
+    std::int32_t leaderMemberId,
+    std::int32_t memberId,
+    const RecordingLog::Entry& lastEntry,
+    const RecordingLog::RecoveryPlan& recoveryPlan,
+    const std::string& clusterMembers)
+{
+    m_backupResponseEncoder
+        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .correlationId(session.correlationId())
+        .logRecordingId(recoveryPlan.log.recordingId)
+        .logLeadershipTermId(recoveryPlan.log.leadershipTermId)
+        .logTermBaseLogPosition(recoveryPlan.log.termBaseLogPosition)
+        .lastLeadershipTermId(lastEntry.leadershipTermId)
+        .lastTermBaseLogPosition(lastEntry.termBaseLogPosition)
+        .commitPositionCounterId(commitPositionCounterId)
+        .leaderMemberId(leaderMemberId)
+        .memberId(memberId);
+
+    auto snapshotsEncoder = m_backupResponseEncoder.snapshotsCount(
+        static_cast<std::uint32_t>(recoveryPlan.snapshots.size()));
+    for (const auto& snapshot : recoveryPlan.snapshots)
+    {
+        snapshotsEncoder
+            .next()
+            .recordingId(snapshot.recordingId)
+            .leadershipTermId(snapshot.leadershipTermId)
+            .termBaseLogPosition(snapshot.termBaseLogPosition)
+            .logPosition(snapshot.logPosition)
+            .timestamp(snapshot.timestamp)
+            .serviceId(snapshot.serviceId);
+    }
+
+    m_backupResponseEncoder.clusterMembers(clusterMembers);
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + m_backupResponseEncoder.encodedLength());
+    return sendSession(session, m_buffer, length);
+}
+
+inline bool ConsensusPublisher::heartbeatRequest(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t correlationId,
+    std::int32_t responseStreamId,
+    const std::string& responseChannel,
+    const std::vector<std::uint8_t>& encodedCredentials)
+{
+    if (!publication)
+    {
+        return false;
+    }
+
+    m_heartbeatRequestEncoder
+        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .correlationId(correlationId)
+        .responseStreamId(responseStreamId)
+        .responseChannel(responseChannel)
+        .putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + m_heartbeatRequestEncoder.encodedLength());
+    return sendPublication(publication, m_buffer, length);
+}
+
+inline bool ConsensusPublisher::heartbeatResponse(ClusterSession& session)
+{
+    m_heartbeatResponseEncoder
+        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .correlationId(session.correlationId());
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + m_heartbeatResponseEncoder.encodedLength());
+    return sendSession(session, m_buffer, length);
+}
+
+inline bool ConsensusPublisher::challengeResponse(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t nextCorrelationId,
+    std::int64_t clusterSessionId,
+    const std::vector<std::uint8_t>& encodedChallengeResponse)
+{
+    m_challengeResponseEncoder
+        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .correlationId(nextCorrelationId)
+        .clusterSessionId(clusterSessionId)
+        .putEncodedCredentials(encodedChallengeResponse.data(), encodedChallengeResponse.size());
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + m_challengeResponseEncoder.encodedLength());
+
+    return sendPublication(publication, m_buffer, length);
+}
+
+inline bool ConsensusPublisher::standbySnapshotTaken(
+    std::shared_ptr<ExclusivePublication> publication,
+    std::int64_t correlationId,
+    std::int32_t version,
+    std::int32_t responseStreamId,
+    const std::string& responseChannel,
+    const std::vector<std::uint8_t>& encodedCredentials,
+    const std::vector<RecordingLog::Entry>& snapshots,
+    const std::string& archiveEndpoint)
+{
+    const std::int32_t snapshotsLength = static_cast<std::int32_t>(snapshots.size());
+    m_standbySnapshotEncoder
+        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder);
+
+    m_standbySnapshotEncoder
+        .correlationId(correlationId)
+        .version(version)
+        .responseStreamId(responseStreamId);
+
+    auto snapshotsEncoder = m_standbySnapshotEncoder.snapshotsCount(
+        static_cast<std::uint32_t>(snapshotsLength));
+
+    for (const auto& entry : snapshots)
+    {
+        snapshotsEncoder
+            .next()
+            .recordingId(entry.recordingId)
+            .leadershipTermId(entry.leadershipTermId)
+            .termBaseLogPosition(entry.termBaseLogPosition)
+            .logPosition(entry.logPosition)
+            .timestamp(entry.timestamp)
+            .serviceId(entry.serviceId)
+            .archiveEndpoint(archiveEndpoint);
+    }
+
+    m_standbySnapshotEncoder
+        .responseChannel(responseChannel)
+        .putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+
+    const std::int32_t encodedLength = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + m_standbySnapshotEncoder.encodedLength());
+
+    return sendPublication(publication, m_buffer, encodedLength);
+}
 
 }}
 

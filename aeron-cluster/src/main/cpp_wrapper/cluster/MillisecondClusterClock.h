@@ -30,14 +30,14 @@ public:
 
     std::int64_t timeMicros() const override
     {
-        return std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        // Java: MILLISECONDS.toMicros(System.currentTimeMillis()) = timeMillis() * 1000
+        return timeMillis() * 1000;
     }
 
     std::int64_t timeNanos() const override
     {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
+        // Java: MILLISECONDS.toNanos(System.currentTimeMillis()) = timeMillis() * 1000000
+        return timeMillis() * 1000000;
     }
 
     std::int64_t convertToNanos(std::int64_t time) const override

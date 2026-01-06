@@ -118,7 +118,25 @@ public:
           pendingMessageTrackers(pendingMessageTrackers)
     {
     }
+
+    std::string toString() const;
 };
+
+// Implementation
+inline std::string ConsensusModuleStateExport::toString() const
+{
+    std::string result = "ConsensusModuleStateExport{";
+    result += "logRecordingId=" + std::to_string(logRecordingId);
+    result += ", leadershipTermId=" + std::to_string(leadershipTermId);
+    result += ", expectedAckPosition=" + std::to_string(expectedAckPosition);
+    result += ", nextSessionId=" + std::to_string(nextSessionId);
+    result += ", serviceAckId=" + std::to_string(serviceAckId);
+    result += ", timers.size()=" + std::to_string(timers.size());
+    result += ", sessions.size()=" + std::to_string(sessions.size());
+    result += ", pendingMessageTrackers.size()=" + std::to_string(pendingMessageTrackers.size());
+    result += "}";
+    return result;
+}
 
 }}
 

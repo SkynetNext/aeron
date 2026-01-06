@@ -30,5 +30,21 @@ public:
         const std::vector<std::uint8_t>& encodedPrincipal) override;
 };
 
-}}
+// Implementation
+inline const AllowBackupAndStandbyAuthorisationService AllowBackupAndStandbyAuthorisationService::INSTANCE{};
 
+inline bool AllowBackupAndStandbyAuthorisationService::isAuthorised(
+    std::int32_t protocolId,
+    std::int32_t actionId,
+    const void* type,
+    const std::vector<std::uint8_t>& encodedPrincipal)
+{
+    // Java: MessageHeaderDecoder.SCHEMA_ID == protocolId
+    // C++: MessageHeader::sbeSchemaId()
+    return MessageHeader::sbeSchemaId() == protocolId &&
+        (BackupQuery::sbeTemplateId() == actionId ||
+         HeartbeatRequest::sbeTemplateId() == actionId ||
+         StandbySnapshot::sbeTemplateId() == actionId);
+}
+
+}}

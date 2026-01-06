@@ -306,6 +306,10 @@ public:
 
 private:
     static void setControlEndpoint(ChannelUri& channelUri, bool shouldBind, const std::string& endpoint);
+    
+    static std::string replacePortWithWildcard(const std::string& endpoint);
+    
+    static void parseMember(const std::string& idAndEndpoints, std::vector<ClusterMember>& members);
 
     bool m_isBallotSent = false;
     bool m_isLeader = false;
@@ -647,9 +651,565 @@ inline bool ClusterMember::areSameEndpoints(const ClusterMember& lhs, const Clus
         lhs.m_archiveEndpoint == rhs.m_archiveEndpoint;
 }
 
-// Note: More complex static methods like parse, encodeAsString, addConsensusPublications, etc.
-// would need full implementation. These are placeholders for now.
+// Static method implementations
+
+inline std::vector<ClusterMember> ClusterMember::EMPTY_MEMBERS{};
+
+inline std::vector<ClusterMember> ClusterMember::parse(const std::string& value)
+{
+    if (value.empty())
+    {
+        return EMPTY_MEMBERS;
+    }
+
+    std::vector<ClusterMember> members;
+    std::string::size_type start = 0;
+    std::string::size_type pos = 0;
+
+    // Split by '|'
+    while ((pos = value.find('|', start)) != std::string::npos)
+    {
+        std::string memberValue = value.substr(start, pos - start);
+        parseMember(memberValue, members);
+        start = pos + 1;
+    }
+    
+    // Last member
+    if (start < value.length())
+    {
+        std::string memberValue = value.substr(start);
+        parseMember(memberValue, members);
+    }
+
+    return members;
+}
+
+inline ClusterMember ClusterMember::parseEndpoints(std::int32_t id, const std::string& endpoints)
+{
+    std::vector<std::string> memberAttributes;
+    std::string::size_type start = 0;
+    std::string::size_type pos = 0;
+
+    // Split by ','
+    while ((pos = endpoints.find(',', start)) != std::string::npos)
+    {
+        memberAttributes.push_back(endpoints.substr(start, pos - start));
+        start = pos + 1;
+    }
+    memberAttributes.push_back(endpoints.substr(start));
+
+    if (memberAttributes.size() != 5)
+    {
+        throw ClusterException("invalid member value: " + endpoints);
+    }
+
+    return ClusterMember(
+        id,
+        memberAttributes[0],
+        memberAttributes[1],
+        memberAttributes[2],
+        memberAttributes[3],
+        memberAttributes[4],
+        endpoints);
+}
+
+inline std::string ClusterMember::encodeAsString(const std::vector<ClusterMember>& clusterMembers)
+{
+    if (clusterMembers.empty())
+    {
+        return "";
+    }
+
+    std::string result;
+    for (std::size_t i = 0; i < clusterMembers.size(); i++)
+    {
+        const auto& member = clusterMembers[i];
+        result += std::to_string(member.m_id);
+        result += ',';
+        result += member.m_endpoints;
+        
+        if (i < clusterMembers.size() - 1)
+        {
+            result += '|';
+        }
+    }
+
+    return result;
+}
+
+inline void ClusterMember::copyVotes(
+    const std::vector<ClusterMember>& srcMembers,
+    std::vector<ClusterMember>& dstMembers)
+{
+    for (const auto& srcMember : srcMembers)
+    {
+        ClusterMember* dstMember = findMember(dstMembers, srcMember.m_id);
+        if (dstMember)
+        {
+            dstMember->vote(srcMember.m_vote);
+        }
+    }
+}
+
+inline void ClusterMember::addConsensusPublications(
+    std::vector<ClusterMember>& members,
+    const ClusterMember& thisMember,
+    const std::string& channelTemplate,
+    std::int32_t streamId,
+    bool bindConsensusControl,
+    std::shared_ptr<Aeron> aeron,
+    const exception_handler_t& errorHandler)
+{
+    ChannelUri channelUri = ChannelUri::parse(channelTemplate);
+
+    for (auto& member : members)
+    {
+        if (member.m_id != thisMember.m_id)
+        {
+            channelUri.put(ENDPOINT_PARAM_NAME, member.m_consensusEndpoint);
+            setControlEndpoint(channelUri, bindConsensusControl, thisMember.m_consensusEndpoint);
+            member.m_consensusChannel = channelUri.toString();
+            tryAddPublication(member, streamId, aeron, errorHandler);
+        }
+    }
+}
+
+inline void ClusterMember::addConsensusPublication(
+    const ClusterMember& thisMember,
+    ClusterMember& otherMember,
+    const std::string& channelTemplate,
+    std::int32_t streamId,
+    bool bindConsensusControl,
+    std::shared_ptr<Aeron> aeron,
+    const exception_handler_t& errorHandler)
+{
+    if (otherMember.m_consensusChannel.empty())
+    {
+        ChannelUri channelUri = ChannelUri::parse(channelTemplate);
+        channelUri.put(ENDPOINT_PARAM_NAME, otherMember.m_consensusEndpoint);
+        setControlEndpoint(channelUri, bindConsensusControl, thisMember.m_consensusEndpoint);
+        otherMember.m_consensusChannel = channelUri.toString();
+    }
+
+    tryAddPublication(otherMember, streamId, aeron, errorHandler);
+}
+
+inline void ClusterMember::tryAddPublication(
+    ClusterMember& member,
+    std::int32_t streamId,
+    std::shared_ptr<Aeron> aeron,
+    const exception_handler_t& errorHandler)
+{
+    try
+    {
+        member.m_publication = aeron->addExclusivePublication(member.m_consensusChannel, streamId);
+    }
+    catch (const RegistrationException& ex)
+    {
+        errorHandler(ClusterException(
+            "failed to add consensus publication for member: " + std::to_string(member.m_id) + " - " + ex.what()));
+    }
+}
+
+inline void ClusterMember::closeConsensusPublications(
+    const exception_handler_t& errorHandler,
+    std::vector<ClusterMember>& clusterMembers)
+{
+    for (auto& member : clusterMembers)
+    {
+        member.closePublication(errorHandler);
+    }
+}
+
+inline void ClusterMember::addClusterMemberIds(
+    std::vector<ClusterMember>& clusterMembers,
+    std::unordered_map<std::int32_t, ClusterMember*>& clusterMemberByIdMap)
+{
+    for (auto& member : clusterMembers)
+    {
+        clusterMemberByIdMap[member.m_id] = &member;
+    }
+}
+
+inline bool ClusterMember::hasActiveQuorum(
+    const std::vector<ClusterMember>& clusterMembers,
+    std::int64_t nowNs,
+    std::int64_t timeoutNs)
+{
+    std::int32_t threshold = quorumThreshold(static_cast<std::int32_t>(clusterMembers.size()));
+
+    for (const auto& member : clusterMembers)
+    {
+        if (member.m_isLeader || nowNs <= (member.m_timeOfLastAppendPositionNs + timeoutNs))
+        {
+            if (--threshold <= 0)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+inline std::int64_t ClusterMember::quorumPosition(
+    const std::vector<ClusterMember>& members,
+    std::vector<std::int64_t>& rankedPositions)
+{
+    const std::size_t length = rankedPositions.size();
+    for (std::size_t i = 0; i < length; i++)
+    {
+        rankedPositions[i] = 0;
+    }
+
+    for (const auto& member : members)
+    {
+        std::int64_t newPosition = member.m_logPosition;
+
+        for (std::size_t i = 0; i < length; i++)
+        {
+            const std::int64_t rankedPosition = rankedPositions[i];
+
+            if (newPosition > rankedPosition)
+            {
+                rankedPositions[i] = newPosition;
+                newPosition = rankedPosition;
+            }
+        }
+    }
+
+    return rankedPositions[length - 1];
+}
+
+inline bool ClusterMember::hasVotersAtPosition(
+    const std::vector<ClusterMember>& clusterMembers,
+    std::int64_t position,
+    std::int64_t leadershipTermId)
+{
+    for (const auto& member : clusterMembers)
+    {
+        if (member.m_vote && (member.m_logPosition < position || member.m_leadershipTermId != leadershipTermId))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+inline bool ClusterMember::hasQuorumAtPosition(
+    const std::vector<ClusterMember>& clusterMembers,
+    std::int64_t position,
+    std::int64_t leadershipTermId)
+{
+    std::int32_t votes = 0;
+
+    for (const auto& member : clusterMembers)
+    {
+        if (member.m_leadershipTermId == leadershipTermId && member.m_logPosition >= position)
+        {
+            ++votes;
+        }
+    }
+
+    return votes >= quorumThreshold(static_cast<std::int32_t>(clusterMembers.size()));
+}
+
+inline void ClusterMember::becomeCandidate(
+    std::vector<ClusterMember>& members,
+    std::int64_t candidateTermId,
+    std::int32_t candidateMemberId)
+{
+    for (auto& member : members)
+    {
+        if (member.m_id == candidateMemberId)
+        {
+            member.vote(std::make_shared<bool>(true))
+                .candidateTermId(candidateTermId)
+                .isBallotSent(true);
+        }
+        else
+        {
+            member.vote(nullptr)
+                .candidateTermId(0) // NULL_VALUE
+                .isBallotSent(false);
+        }
+    }
+}
+
+inline bool ClusterMember::isUnanimousLeader(
+    const std::vector<ClusterMember>& clusterMembers,
+    std::int64_t candidateTermId,
+    std::int32_t gracefulClosedLeaderId)
+{
+    std::int32_t votes = 0;
+
+    for (const auto& member : clusterMembers)
+    {
+        if (member.m_id == gracefulClosedLeaderId)
+        {
+            continue;
+        }
+
+        if (candidateTermId != member.m_candidateTermId || !member.m_vote || !*member.m_vote)
+        {
+            return false;
+        }
+
+        votes++;
+    }
+
+    return votes >= quorumThreshold(static_cast<std::int32_t>(clusterMembers.size()));
+}
+
+inline bool ClusterMember::isQuorumLeader(
+    const std::vector<ClusterMember>& clusterMembers,
+    std::int64_t candidateTermId)
+{
+    std::int32_t votes = 0;
+
+    for (const auto& member : clusterMembers)
+    {
+        if (candidateTermId == member.m_candidateTermId)
+        {
+            if (member.m_vote && !*member.m_vote) // Boolean.FALSE
+            {
+                return false;
+            }
+
+            if (member.m_vote && *member.m_vote) // Boolean.TRUE
+            {
+                ++votes;
+            }
+        }
+    }
+
+    return votes >= quorumThreshold(static_cast<std::int32_t>(clusterMembers.size()));
+}
+
+inline ClusterMember ClusterMember::determineMember(
+    const std::vector<ClusterMember>& clusterMembers,
+    std::int32_t memberId,
+    const std::string& memberEndpoints)
+{
+    ClusterMember* member = (0 != memberId) ? findMember(const_cast<std::vector<ClusterMember>&>(clusterMembers), memberId) : nullptr;
+
+    if ((clusterMembers.empty() || 0 == clusterMembers.size()) && !member)
+    {
+        return parseEndpoints(0, memberEndpoints); // NULL_VALUE
+    }
+    else
+    {
+        if (!member)
+        {
+            throw ClusterException("memberId=" + std::to_string(memberId) + " not found in clusterMembers");
+        }
+
+        if (!memberEndpoints.empty())
+        {
+            validateMemberEndpoints(*member, memberEndpoints);
+        }
+
+        return *member;
+    }
+}
+
+inline void ClusterMember::validateMemberEndpoints(
+    const ClusterMember& member,
+    const std::string& memberEndpoints)
+{
+    ClusterMember endpoints = parseEndpoints(0, memberEndpoints); // NULL_VALUE
+
+    if (!areSameEndpoints(member, endpoints))
+    {
+        throw ClusterException(
+            "clusterMembers and endpoints differ: " + member.m_endpoints + " != " + memberEndpoints);
+    }
+}
+
+inline bool ClusterMember::isUnanimousCandidate(
+    const std::vector<ClusterMember>& clusterMembers,
+    const ClusterMember& candidate,
+    std::int32_t gracefulClosedLeaderId)
+{
+    std::int32_t possibleVotes = 0;
+
+    for (const auto& member : clusterMembers)
+    {
+        if (member.m_id == gracefulClosedLeaderId)
+        {
+            continue;
+        }
+
+        if (0 == member.m_logPosition || compareLog(candidate, member) < 0) // NULL_POSITION
+        {
+            return false;
+        }
+
+        possibleVotes++;
+    }
+
+    return possibleVotes >= quorumThreshold(static_cast<std::int32_t>(clusterMembers.size()));
+}
+
+inline bool ClusterMember::isQuorumCandidate(
+    const std::vector<ClusterMember>& clusterMembers,
+    const ClusterMember& candidate)
+{
+    std::int32_t possibleVotes = 0;
+
+    for (const auto& member : clusterMembers)
+    {
+        if (0 == member.m_logPosition || compareLog(candidate, member) < 0) // NULL_POSITION
+        {
+            continue;
+        }
+
+        ++possibleVotes;
+    }
+
+    return possibleVotes >= quorumThreshold(static_cast<std::int32_t>(clusterMembers.size()));
+}
+
+inline std::string ClusterMember::ingressEndpoints(const std::vector<ClusterMember>& members)
+{
+    std::string result;
+    result.reserve(100);
+
+    for (std::size_t i = 0; i < members.size(); i++)
+    {
+        if (0 != i)
+        {
+            result += ',';
+        }
+
+        const auto& member = members[i];
+        result += std::to_string(member.m_id);
+        result += '=';
+        result += member.m_ingressEndpoint;
+    }
+
+    return result;
+}
+
+inline std::string ClusterMember::toString() const
+{
+    return "ClusterMember{" +
+        "id=" + std::to_string(m_id) +
+        ", isBallotSent=" + (m_isBallotSent ? "true" : "false") +
+        ", isLeader=" + (m_isLeader ? "true" : "false") +
+        ", leadershipTermId=" + std::to_string(m_leadershipTermId) +
+        ", logPosition=" + std::to_string(m_logPosition) +
+        ", candidateTermId=" + std::to_string(m_candidateTermId) +
+        ", catchupReplaySessionId=" + std::to_string(m_catchupReplaySessionId) +
+        ", correlationId=" + std::to_string(m_changeCorrelationId) +
+        ", timeOfLastAppendPositionNs=" + std::to_string(m_timeOfLastAppendPositionNs) +
+        ", ingressEndpoint='" + m_ingressEndpoint + '\'' +
+        ", consensusEndpoint='" + m_consensusEndpoint + '\'' +
+        ", logEndpoint='" + m_logEndpoint + '\'' +
+        ", catchupEndpoint='" + m_catchupEndpoint + '\'' +
+        ", archiveEndpoint='" + m_archiveEndpoint + '\'' +
+        ", endpoints='" + m_endpoints + '\'' +
+        ", vote=" + (m_vote ? (*m_vote ? "true" : "false") : "null") +
+        "}";
+}
+
+inline void ClusterMember::setControlEndpoint(
+    ChannelUri& channelUri,
+    bool shouldBind,
+    const std::string& endpoint)
+{
+    if (!shouldBind)
+    {
+        return;
+    }
+
+    std::string controlEndpoint = replacePortWithWildcard(endpoint);
+    if (controlEndpoint.empty())
+    {
+        return;
+    }
+
+    channelUri.put(MDC_CONTROL_PARAM_NAME, controlEndpoint);
+}
+
+inline std::string ClusterMember::replacePortWithWildcard(const std::string& endpoint)
+{
+    if (endpoint.empty())
+    {
+        return "";
+    }
+
+    const std::string::size_type i = endpoint.find_last_of(':');
+    if (std::string::npos == i)
+    {
+        return "";
+    }
+
+    return endpoint.substr(0, i + 1) + "0";
+}
+
+inline void ClusterMember::parseMember(const std::string& idAndEndpoints, std::vector<ClusterMember>& members)
+{
+    std::vector<std::string> memberAttributes;
+    std::string::size_type start = 0;
+    std::string::size_type pos = 0;
+
+    // Split by ','
+    while ((pos = idAndEndpoints.find(',', start)) != std::string::npos)
+    {
+        memberAttributes.push_back(idAndEndpoints.substr(start, pos - start));
+        start = pos + 1;
+    }
+    memberAttributes.push_back(idAndEndpoints.substr(start));
+
+    if (memberAttributes.size() < 6 || 8 < memberAttributes.size())
+    {
+        throw ClusterException("invalid member value: " + idAndEndpoints);
+    }
+
+    std::int32_t clusterMemberId;
+    try
+    {
+        clusterMemberId = static_cast<std::int32_t>(std::stoi(memberAttributes[0]));
+    }
+    catch (const std::exception& ex)
+    {
+        throw ClusterException("invalid cluster member id, must be an integer value: " + std::string(ex.what()));
+    }
+
+    const std::string archiveResponseEndpoint = (6 < memberAttributes.size()) ? memberAttributes[6] : "";
+    const std::string egressResponseEndpoint = (7 < memberAttributes.size()) ? memberAttributes[7] : "";
+
+    std::string endpoints = memberAttributes[1] + "," +
+        memberAttributes[2] + "," +
+        memberAttributes[3] + "," +
+        memberAttributes[4] + "," +
+        memberAttributes[5];
+
+    if (!archiveResponseEndpoint.empty())
+    {
+        endpoints += "," + archiveResponseEndpoint;
+    }
+
+    if (!egressResponseEndpoint.empty())
+    {
+        endpoints += "," + egressResponseEndpoint;
+    }
+
+    members.emplace_back(
+        clusterMemberId,
+        memberAttributes[1],
+        memberAttributes[2],
+        memberAttributes[3],
+        memberAttributes[4],
+        memberAttributes[5],
+        archiveResponseEndpoint,
+        egressResponseEndpoint,
+        endpoints);
+}
 
 }}
+
 
 

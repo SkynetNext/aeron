@@ -19,5 +19,12 @@ public:
         TimerService::TimerHandler timerHandler) override;
 };
 
-}}
+// Implementation
+inline std::shared_ptr<TimerService> PriorityHeapTimerServiceSupplier::newInstance(
+    std::chrono::milliseconds::rep timeUnit,
+    TimerService::TimerHandler timerHandler)
+{
+    return std::make_shared<PriorityHeapTimerService>(timerHandler);
+}
 
+}}
