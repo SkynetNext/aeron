@@ -16,7 +16,7 @@
 #include "util/StringUtil.h"
 #include "concurrent/AtomicBuffer.h"
 #include "RecordingExtent.h"
-#include "ConsensusModule.h"
+#include "ConsensusModuleAgent.h"
 
 namespace aeron { namespace cluster {
 
@@ -1153,8 +1153,7 @@ inline bool RecordingLog::restoreInvalidSnapshot(
 
 inline RecordingLog::Entry* RecordingLog::getLatestSnapshot(std::int32_t serviceId)
 {
-    // TODO: This needs ConsensusModule::Configuration::SERVICE_ID constant
-    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = 0; // Placeholder
+    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = ConsensusModuleAgent::SERVICE_ID;
     
     for (int i = static_cast<int>(m_entriesCache.size()) - 1; i >= 0; i--)
     {
@@ -1183,8 +1182,7 @@ inline RecordingLog::Entry* RecordingLog::getLatestSnapshot(std::int32_t service
 
 inline bool RecordingLog::invalidateLatestSnapshot()
 {
-    // TODO: This needs ConsensusModule::Configuration::SERVICE_ID constant
-    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = 0; // Placeholder
+    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = ConsensusModuleAgent::SERVICE_ID;
     
     std::vector<std::int32_t> indices;
     std::int64_t highLogPosition = AeronArchive::NULL_POSITION;
@@ -1418,8 +1416,7 @@ inline void RecordingLog::planRecovery(
     int logIndex = -1;
     int snapshotIndex = -1;
     
-    // TODO: This needs ConsensusModule::Configuration::SERVICE_ID constant
-    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = 0; // Placeholder
+    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = ConsensusModuleAgent::SERVICE_ID;
     
     for (int i = static_cast<int>(entries.size()) - 1; i >= 0; i--)
     {
