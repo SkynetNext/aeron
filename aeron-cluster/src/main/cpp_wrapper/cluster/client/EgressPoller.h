@@ -16,18 +16,25 @@
 #pragma once
 
 #include "Aeron.h"
+#include "Context.h"
+#include "Image.h"
 #include "ControlledFragmentAssembler.h"
 #include "concurrent/logbuffer/Header.h"
 #include "concurrent/AtomicBuffer.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SessionMessageHeader.h"
-#include "generated/aeron_cluster_client/SessionEvent.h"
-#include "generated/aeron_cluster_client/NewLeaderEvent.h"
-#include "generated/aeron_cluster_client/Challenge.h"
-#include "generated/aeron_cluster_client/EventCode.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionEvent.h"
+#include "generated/aeron_cluster_codecs/NewLeaderEvent.h"
+#include "generated/aeron_cluster_codecs/Challenge.h"
+#include "generated/aeron_cluster_codecs/EventCode.h"
+
+// Forward declaration for test fixture (only defined in test files, in global namespace)
+class EgressPollerTestFixture;
 
 namespace aeron { namespace cluster { namespace client
 {
+
+using namespace aeron::cluster::codecs;
 
 /**
  * Poller for the egress from a cluster to capture administration message details.
@@ -36,6 +43,9 @@ namespace aeron { namespace cluster { namespace client
  */
 class EgressPoller
 {
+    // Allow test classes to access private onFragment method for 1:1 test translation
+    friend class ::EgressPollerTestFixture;
+
 public:
     /**
      * Construct a poller on the egress subscription.
@@ -190,7 +200,7 @@ public:
      */
     inline bool isChallenged() const
     {
-        return Challenge::TEMPLATE_ID == m_templateId;
+        return Challenge::SBE_TEMPLATE_ID == m_templateId;
     }
 
     /**
@@ -203,13 +213,13 @@ public:
         if (m_isPollComplete)
         {
             m_isPollComplete = false;
-            m_clusterSessionId = Aeron::NULL_VALUE;
-            m_correlationId = Aeron::NULL_VALUE;
-            m_leadershipTermId = Aeron::NULL_VALUE;
-            m_leaderMemberId = Aeron::NULL_VALUE;
-            m_templateId = Aeron::NULL_VALUE;
+            m_clusterSessionId = NULL_VALUE;
+            m_correlationId = NULL_VALUE;
+            m_leadershipTermId = NULL_VALUE;
+            m_leaderMemberId = NULL_VALUE;
+            m_templateId = NULL_VALUE;
             m_version = 0;
-            m_leaderHeartbeatTimeoutNs = Aeron::NULL_VALUE;
+            m_leaderHeartbeatTimeoutNs = NULL_VALUE;
             m_eventCode = EventCode::Value::NULL_VALUE;
             m_detail = "";
             m_encodedChallenge.clear();
@@ -224,25 +234,27 @@ private:
     ControlledFragmentAssembler m_fragmentAssembler;
 
     Image *m_egressImage = nullptr;
-    std::int64_t m_clusterSessionId = Aeron::NULL_VALUE;
-    std::int64_t m_correlationId = Aeron::NULL_VALUE;
-    std::int64_t m_leadershipTermId = Aeron::NULL_VALUE;
-    std::int32_t m_leaderMemberId = Aeron::NULL_VALUE;
-    std::int32_t m_templateId = Aeron::NULL_VALUE;
+    std::int64_t m_clusterSessionId = NULL_VALUE;
+    std::int64_t m_correlationId = NULL_VALUE;
+    std::int64_t m_leadershipTermId = NULL_VALUE;
+    std::int32_t m_leaderMemberId = NULL_VALUE;
+    std::int32_t m_templateId = NULL_VALUE;
     std::int32_t m_version = 0;
-    std::int64_t m_leaderHeartbeatTimeoutNs = Aeron::NULL_VALUE;
+    std::int64_t m_leaderHeartbeatTimeoutNs = NULL_VALUE;
     bool m_isPollComplete = false;
     EventCode::Value m_eventCode = EventCode::Value::NULL_VALUE;
     std::string m_detail;
     std::vector<std::uint8_t> m_encodedChallenge;
 
-    MessageHeaderDecoder m_messageHeaderDecoder;
-    SessionMessageHeaderDecoder m_sessionMessageHeaderDecoder;
-    SessionEventDecoder m_sessionEventDecoder;
-    NewLeaderEventDecoder m_newLeaderEventDecoder;
-    ChallengeDecoder m_challengeDecoder;
+    MessageHeader m_messageHeaderDecoder;
+    SessionMessageHeader m_sessionMessageHeaderDecoder;
+    SessionEvent m_sessionEventDecoder;
+    NewLeaderEvent m_newLeaderEventDecoder;
+    Challenge m_challengeDecoder;
 
-    ControlledFragmentHandler::Action onFragment(
+public:
+    // Made public for 1:1 test translation (friend declaration not working reliably)
+    ControlledPollAction onFragment(
         concurrent::AtomicBuffer &buffer,
         util::index_t offset,
         util::index_t length,
@@ -250,41 +262,47 @@ private:
     {
         if (m_isPollComplete)
         {
-            return ControlledFragmentHandler::Action::ABORT;
+            return ControlledPollAction::ABORT;
         }
 
-        m_messageHeaderDecoder.wrap(buffer, offset);
+        m_messageHeaderDecoder.wrap(
+            reinterpret_cast<char *>(buffer.buffer()),
+            offset,
+            MessageHeader::sbeSchemaVersion(),
+            buffer.capacity());
 
-        const std::int32_t schemaId = m_messageHeaderDecoder.schemaId();
-        if (schemaId != MessageHeaderDecoder::SCHEMA_ID)
+        const std::uint16_t schemaId = m_messageHeaderDecoder.sbeSchemaId();
+        if (schemaId != MessageHeader::sbeSchemaId())
         {
-            return ControlledFragmentHandler::Action::CONTINUE; // skip unknown schemas
+            return ControlledPollAction::CONTINUE; // skip unknown schemas
         }
 
         m_templateId = m_messageHeaderDecoder.templateId();
         switch (m_templateId)
         {
-            case SessionMessageHeaderDecoder::TEMPLATE_ID:
+            case SessionMessageHeader::SBE_TEMPLATE_ID:
             {
-                m_sessionMessageHeaderDecoder.wrap(
-                    buffer,
-                    offset + MessageHeaderDecoder::ENCODED_LENGTH,
+                m_sessionMessageHeaderDecoder = SessionMessageHeader(
+                    reinterpret_cast<char *>(buffer.buffer()),
+                    offset + MessageHeader::encodedLength(),
+                    buffer.capacity(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.version());
+                    m_messageHeaderDecoder.actingVersion());
 
                 m_leadershipTermId = m_sessionMessageHeaderDecoder.leadershipTermId();
                 m_clusterSessionId = m_sessionMessageHeaderDecoder.clusterSessionId();
                 m_isPollComplete = true;
-                return ControlledFragmentHandler::Action::BREAK;
+                return ControlledPollAction::BREAK;
             }
 
-            case SessionEventDecoder::TEMPLATE_ID:
+            case SessionEvent::SBE_TEMPLATE_ID:
             {
-                m_sessionEventDecoder.wrap(
-                    buffer,
-                    offset + MessageHeaderDecoder::ENCODED_LENGTH,
+                m_sessionEventDecoder = SessionEvent(
+                    reinterpret_cast<char *>(buffer.buffer()),
+                    offset + MessageHeader::encodedLength(),
+                    buffer.capacity(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.version());
+                    m_messageHeaderDecoder.actingVersion());
 
                 m_clusterSessionId = m_sessionEventDecoder.clusterSessionId();
                 m_correlationId = m_sessionEventDecoder.correlationId();
@@ -295,59 +313,61 @@ private:
                 m_leaderHeartbeatTimeoutNs = leaderHeartbeatTimeoutNs(m_sessionEventDecoder);
                 m_detail = m_sessionEventDecoder.detail();
                 m_isPollComplete = true;
-                m_egressImage = header.context();
-                return ControlledFragmentHandler::Action::BREAK;
+                m_egressImage = static_cast<Image *>(header.context());
+                return ControlledPollAction::BREAK;
             }
 
-            case NewLeaderEventDecoder::TEMPLATE_ID:
+            case NewLeaderEvent::SBE_TEMPLATE_ID:
             {
-                m_newLeaderEventDecoder.wrap(
-                    buffer,
-                    offset + MessageHeaderDecoder::ENCODED_LENGTH,
+                m_newLeaderEventDecoder = NewLeaderEvent(
+                    reinterpret_cast<char *>(buffer.buffer()),
+                    offset + MessageHeader::encodedLength(),
+                    buffer.capacity(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.version());
+                    m_messageHeaderDecoder.actingVersion());
 
                 m_clusterSessionId = m_newLeaderEventDecoder.clusterSessionId();
                 m_leadershipTermId = m_newLeaderEventDecoder.leadershipTermId();
                 m_leaderMemberId = m_newLeaderEventDecoder.leaderMemberId();
                 m_detail = m_newLeaderEventDecoder.ingressEndpoints();
                 m_isPollComplete = true;
-                m_egressImage = header.context();
-                return ControlledFragmentHandler::Action::BREAK;
+                m_egressImage = static_cast<Image *>(header.context());
+                return ControlledPollAction::BREAK;
             }
 
-            case ChallengeDecoder::TEMPLATE_ID:
+            case Challenge::SBE_TEMPLATE_ID:
             {
-                m_challengeDecoder.wrap(
-                    buffer,
-                    offset + MessageHeaderDecoder::ENCODED_LENGTH,
+                m_challengeDecoder = Challenge(
+                    reinterpret_cast<char *>(buffer.buffer()),
+                    offset + MessageHeader::encodedLength(),
+                    buffer.capacity(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.version());
+                    m_messageHeaderDecoder.actingVersion());
 
-                const std::int32_t encodedChallengeLength = m_challengeDecoder.encodedChallengeLength();
+                const std::uint32_t encodedChallengeLength = m_challengeDecoder.encodedChallengeLength();
                 m_encodedChallenge.resize(encodedChallengeLength == 0 ? 0 : encodedChallengeLength);
                 if (encodedChallengeLength > 0)
                 {
-                    m_challengeDecoder.getEncodedChallenge(m_encodedChallenge.data(), 0, encodedChallengeLength);
+                    m_challengeDecoder.getEncodedChallenge(reinterpret_cast<char *>(m_encodedChallenge.data()), encodedChallengeLength);
                 }
 
                 m_clusterSessionId = m_challengeDecoder.clusterSessionId();
                 m_correlationId = m_challengeDecoder.correlationId();
                 m_isPollComplete = true;
-                return ControlledFragmentHandler::Action::BREAK;
+                return ControlledPollAction::BREAK;
             }
         }
 
-        return ControlledFragmentHandler::Action::CONTINUE;
+        return ControlledPollAction::CONTINUE;
     }
 
-    static std::int64_t leaderHeartbeatTimeoutNs(const SessionEventDecoder &sessionEventDecoder)
+    static std::int64_t leaderHeartbeatTimeoutNs(const SessionEvent &sessionEventDecoder)
     {
         const std::int64_t leaderHeartbeatTimeoutNs = sessionEventDecoder.leaderHeartbeatTimeoutNs();
 
-        if (leaderHeartbeatTimeoutNs == SessionEventDecoder::leaderHeartbeatTimeoutNsNullValue())
+        if (leaderHeartbeatTimeoutNs == SessionEvent::leaderHeartbeatTimeoutNsNullValue())
         {
-            return Aeron::NULL_VALUE;
+            return NULL_VALUE;
         }
 
         return leaderHeartbeatTimeoutNs;

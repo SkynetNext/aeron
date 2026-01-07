@@ -32,9 +32,10 @@ set(SBE_XSD ${CLUSTER_CODEC_SCHEMA_DIR}/fpl/sbe.xsd)
 
 # Note: SBE generates many header files, we list a few key ones to track generation
 # The actual generated files will be in the generated directory structure
+# SBE generates files in aeron_cluster_codecs/ subdirectory (default behavior for multiple XML files)
 set(GENERATED_CPP_CODECS
-    ${CLUSTER_CODEC_TARGET_DIR}/MessageHeader.h
-    ${CLUSTER_CODEC_TARGET_DIR}/SessionMessageHeader.h
+    ${CLUSTER_CODEC_TARGET_DIR}/aeron_cluster_codecs/MessageHeader.h
+    ${CLUSTER_CODEC_TARGET_DIR}/aeron_cluster_codecs/SessionMessageHeader.h
 )
 
 # Find gradle wrapper
@@ -91,11 +92,11 @@ target_include_directories(aeron_cluster_wrapper
     INTERFACE
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
     "$<BUILD_INTERFACE:${AERON_CLIENT_WRAPPER_SOURCE_PATH}>"
-    "$<BUILD_INTERFACE:${CLUSTER_CODEC_TARGET_DIR}>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>"
     "$<INSTALL_INTERFACE:include/wrapper>"
 )
 
-add_dependencies(aeron_cluster_wrapper cluster_cpp_codecs)
+add_dependencies(aeron_cluster_wrapper cluster_cpp_codecs archive_cpp_codecs)
 
 target_sources(aeron_cluster_wrapper INTERFACE "$<BUILD_INTERFACE:${HEADERS}>")
 
@@ -113,6 +114,7 @@ endif ()
 target_link_libraries(aeron_cluster_wrapper 
     INTERFACE 
     aeron_client_wrapper
+    aeron_archive_wrapper
     ${CMAKE_THREAD_LIBS_INIT}
 )
 

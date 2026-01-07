@@ -18,12 +18,14 @@
 #include "Aeron.h"
 #include "concurrent/logbuffer/Header.h"
 #include "concurrent/AtomicBuffer.h"
-#include "generated/aeron_cluster_client/EventCode.h"
-#include "generated/aeron_cluster_client/AdminRequestType.h"
-#include "generated/aeron_cluster_client/AdminResponseCode.h"
+#include "generated/aeron_cluster_codecs/EventCode.h"
+#include "generated/aeron_cluster_codecs/AdminRequestType.h"
+#include "generated/aeron_cluster_codecs/AdminResponseCode.h"
 
 namespace aeron { namespace cluster { namespace client
 {
+
+using namespace aeron::cluster::codecs;
 
 /**
  * Interface for consuming messages coming from the cluster that also include administrative events.

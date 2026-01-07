@@ -2,8 +2,8 @@
 
 #include <cstdint>
 #include <string>
-#include "aeron_cluster/ClusterTimeUnit.h"
-#include "aeron_cluster/CloseReason.h"
+#include "generated/aeron_cluster_codecs/ClusterTimeUnit.h"
+#include "generated/aeron_cluster_codecs/CloseReason.h"
 #include "util/DirectBuffer.h"
 
 namespace aeron { namespace cluster {

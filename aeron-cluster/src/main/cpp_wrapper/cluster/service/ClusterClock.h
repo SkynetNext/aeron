@@ -16,7 +16,7 @@
 #pragma once
 
 #include <chrono>
-#include "generated/aeron_cluster_client/ClusterTimeUnit.h"
+#include "generated/aeron_cluster_codecs/ClusterTimeUnit.h"
 #include "util/Exceptions.h"
 
 namespace aeron { namespace cluster { namespace service
@@ -60,7 +60,8 @@ public:
     virtual std::int64_t timeMillis() const
     {
         // Default implementation assumes time() returns milliseconds
-        return time();
+        // Note: time() is not const, but we need const here for interface compatibility
+        return const_cast<ClusterClock*>(this)->time();
     }
 
     /**
@@ -133,7 +134,7 @@ public:
     {
         switch (clusterTimeUnit)
         {
-            case ClusterTimeUnit::Value::NULL_VAL:
+            case ClusterTimeUnit::Value::NULL_VALUE:
             case ClusterTimeUnit::Value::MILLIS:
                 return 1000000; // nanoseconds per millisecond
 

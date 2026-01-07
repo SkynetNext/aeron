@@ -43,6 +43,8 @@ SET(HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/Atomic64.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/AtomicBuffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/AtomicCounter.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/EpochClock.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/UnsafeBuffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/BackOffIdleStrategy.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/BusySpinIdleStrategy.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/CountersReader.h
@@ -52,6 +54,7 @@ SET(HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/atomic/Atomic64_gcc_cpp11.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/atomic/Atomic64_gcc_x86_64.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/atomic/Atomic64_msvc.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/errors/DistinctErrorLog.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/errors/ErrorLogDescriptor.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/errors/ErrorLogReader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/logbuffer/BufferClaim.h
@@ -66,7 +69,10 @@ SET(HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/status/UnsafeBufferPosition.h
     ${CMAKE_CURRENT_SOURCE_DIR}/status/PublicationErrorFrame.h
     ${CMAKE_CURRENT_SOURCE_DIR}/util/BitUtil.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/util/CloseHelper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/util/CommandOption.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/util/DirectBuffer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/util/ExpandableArrayBuffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/util/CommandOptionParser.h
     ${CMAKE_CURRENT_SOURCE_DIR}/util/Exceptions.h
     ${CMAKE_CURRENT_SOURCE_DIR}/util/Index.h

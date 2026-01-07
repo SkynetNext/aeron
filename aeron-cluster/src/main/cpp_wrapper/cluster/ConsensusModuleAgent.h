@@ -7,29 +7,67 @@
 #include <chrono>
 #include <functional>
 #include <deque>
+#include <stdexcept>
 #include "Aeron.h"
 #include "Subscription.h"
-#include "archive/client/AeronArchive.h"
-#include "security/Authenticator.h"
-#include "security/AuthorisationService.h"
-#include "concurrent/IdleStrategy.h"
-#include "concurrent/AgentTerminationException.h"
-#include "concurrent/logbuffer/ControlledFragmentHandler.h"
+#include "client/archive/AeronArchive.h"
+// TODO: security/Authenticator.h and security/AuthorisationService.h not yet implemented in C++ wrapper
+// #include "security/Authenticator.h"
+// #include "security/AuthorisationService.h"
+// TODO: IdleStrategy base class not yet implemented in C++ wrapper
+// C++ wrapper only has concrete implementations (BackoffIdleStrategy, BusySpinIdleStrategy, etc.)
+// #include "concurrent/IdleStrategy.h"
+
+// Forward declaration for IdleStrategy (not yet implemented as base class in C++ wrapper)
+namespace aeron { namespace concurrent {
+    class IdleStrategy;  // Forward declaration - C++ wrapper uses concrete types
+}}
+// TODO: AgentTerminationException not yet implemented in C++ wrapper
+// #include "concurrent/AgentTerminationException.h"
+
+// Simple AgentTerminationException implementation for 1:1 translation
+namespace aeron { namespace concurrent {
+    class AgentTerminationException : public std::runtime_error
+    {
+    public:
+        explicit AgentTerminationException(const std::string& what) : std::runtime_error(what) {}
+    };
+}}
+// TODO: ControlledFragmentHandler not yet implemented in C++ wrapper
+// C++ wrapper uses ControlledPollAction enum and controlled_poll_fragment_handler_t type instead
+// #include "concurrent/logbuffer/ControlledFragmentHandler.h"
 #include "concurrent/logbuffer/Header.h"
 #include "concurrent/AtomicBuffer.h"
-#include "concurrent/status/AtomicCounter.h"
-#include "concurrent/status/ReadableCounter.h"
-#include "concurrent/status/CountersReader.h"
+#include "concurrent/AtomicCounter.h"
+#include "concurrent/CountersReader.h"
+// TODO: ReadableCounter not yet implemented in C++ wrapper
 #include "util/Exceptions.h"
-#include "util/CloseHelper.h"
-#include "util/ExpandableArrayBuffer.h"
+// TODO: CloseHelper not yet implemented in C++ wrapper
+// Simple helper to close resources (similar to Java CloseHelper)
+template<typename T>
+inline void closeHelper(T* ptr) {
+    if (ptr) {
+        delete ptr;
+    }
+}
+
+template<typename T>
+inline void closeHelper(std::shared_ptr<T>& ptr) {
+    ptr.reset();
+}
+
+template<typename T>
+inline void closeHelper(std::shared_ptr<T>& ptr, void* /*errorHandler*/) {
+    ptr.reset();
+}
+// ExpandableArrayBuffer is now in util/ExpandableArrayBuffer.h
 #include "util/SemanticVersion.h"
 #include "ChannelUri.h"
-#include "../client/ClusterExceptions.h"
-#include "../client/ClusterEvent.h"
-#include "../client/AeronCluster.h"
-#include "../service/ClusterClock.h"
-#include "../service/ClusterMarkFile.h"
+#include "client/ClusterExceptions.h"
+#include "client/ClusterEvent.h"
+#include "client/AeronCluster.h"
+#include "service/ClusterClock.h"
+#include "service/ClusterMarkFile.h"
 #include "ClusterSession.h"
 #include "ClusterMember.h"
 #include "LogAdapter.h"
@@ -51,9 +89,9 @@
 #include "ClusterTermination.h"
 #include "ClusterSessionProxy.h"
 #include "../service/ClusterTerminationException.h"
-#include "aeron_cluster/CloseReason.h"
-#include "aeron_cluster/EventCode.h"
-#include "aeron_cluster/ClusterAction.h"
+#include "generated/aeron_cluster_codecs/CloseReason.h"
+#include "generated/aeron_cluster_codecs/EventCode.h"
+#include "generated/aeron_cluster_codecs/ClusterAction.h"
 #include "generated/aeron_cluster_client/AdminRequestType.h"
 #include "generated/aeron_cluster_client/AdminResponseCode.h"
 
@@ -63,8 +101,15 @@ using namespace aeron::concurrent;
 using namespace aeron::concurrent::logbuffer;
 using namespace aeron::concurrent::status;
 using namespace aeron::archive::client;
-using namespace aeron::security;
+// TODO: aeron::security namespace not yet implemented in C++ wrapper
+// using namespace aeron::security;
 using namespace aeron::util;
+
+// Forward declarations for security types (not yet implemented in C++ wrapper)
+namespace aeron { namespace security {
+    class Authenticator;
+    class AuthorisationService;
+}}
 using namespace aeron::cluster::codecs;
 using namespace aeron::cluster::service;
 using namespace aeron::cluster::client;
@@ -423,7 +468,8 @@ private:
     std::shared_ptr<AtomicCounter> m_controlToggle;
     std::shared_ptr<AtomicCounter> m_nodeControlToggle;
     std::shared_ptr<AtomicCounter> m_clusterRoleCounter;
-    std::shared_ptr<ReadableCounter> m_appendPosition;
+    // TODO: ReadableCounter not yet implemented in C++ wrapper, using AtomicCounter instead
+    std::shared_ptr<AtomicCounter> m_appendPosition;
 
     ExpandableArrayBuffer m_tempBuffer;
 
@@ -825,11 +871,11 @@ inline void ConsensusModuleAgent::onClose()
         
         if (m_consensusModuleExtension)
         {
-            CloseHelper::close(m_consensusModuleExtension);
+            if (m_consensusModuleExtension) { closeHelper(m_consensusModuleExtension); }
         }
         if (m_extensionArchive)
         {
-            CloseHelper::close(errorHandler, m_extensionArchive);
+            if (m_extensionArchive) { closeHelper(m_extensionArchive, errorHandler); }
         }
 
         if (m_logPublisher)
@@ -838,13 +884,13 @@ inline void ConsensusModuleAgent::onClose()
         }
         if (m_logAdapter)
         {
-            CloseHelper::close(m_logAdapter->subscription());
+            if (m_logAdapter) { m_logAdapter->subscription().reset(); }
         }
         tryStopLogRecording();
 
         if (m_archive)
         {
-            CloseHelper::close(errorHandler, m_archive);
+            if (m_archive) { closeHelper(m_archive, errorHandler); }
         }
 
         if (!m_ctx.ownsAeronClient())
@@ -852,19 +898,19 @@ inline void ConsensusModuleAgent::onClose()
             ClusterMember::closeConsensusPublications(errorHandler, m_activeMembers);
             if (m_ingressAdapter)
             {
-                CloseHelper::close(errorHandler, m_ingressAdapter);
+                if (m_ingressAdapter) { closeHelper(m_ingressAdapter, errorHandler); }
             }
             if (m_consensusAdapter)
             {
-                CloseHelper::close(errorHandler, m_consensusAdapter);
+                if (m_consensusAdapter) { closeHelper(m_consensusAdapter, errorHandler); }
             }
             if (m_serviceProxy)
             {
-                CloseHelper::close(errorHandler, m_serviceProxy);
+                if (m_serviceProxy) { closeHelper(m_serviceProxy, errorHandler); }
             }
             if (m_consensusModuleAdapter)
             {
-                CloseHelper::close(errorHandler, m_consensusModuleAdapter);
+                if (m_consensusModuleAdapter) { closeHelper(m_consensusModuleAdapter, errorHandler); }
             }
 
             for (auto& [sessionId, session] : m_sessionByIdMap)

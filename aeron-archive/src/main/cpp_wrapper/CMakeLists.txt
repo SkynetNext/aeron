@@ -18,6 +18,65 @@ if (MSVC AND "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
     set(BUILD_SHARED_LIBS ON)
 endif ()
 
+find_package(Java REQUIRED)
+
+# SBE Codec generation for C++
+set(ARCHIVE_CODEC_SCHEMA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../resources/archive")
+set(ARCHIVE_CODEC_TARGET_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(ARCHIVE_CODEC_WORKING_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+
+set(CODEC_SCHEMA ${ARCHIVE_CODEC_SCHEMA_DIR}/aeron-archive-codecs.xml)
+set(SBE_XSD ${ARCHIVE_CODEC_SCHEMA_DIR}/fpl/sbe.xsd)
+
+# Note: SBE generates files in aeron_archive_client/ subdirectory (default behavior)
+set(GENERATED_CPP_CODECS
+    ${ARCHIVE_CODEC_TARGET_DIR}/aeron_archive_client/MessageHeader.h
+    ${ARCHIVE_CODEC_TARGET_DIR}/aeron_archive_client/ControlResponse.h
+)
+
+# Find gradle wrapper
+find_program(GRADLE_WRAPPER
+    NAMES gradlew.bat gradlew
+    PATHS ${ARCHIVE_CODEC_WORKING_DIR}
+    NO_DEFAULT_PATH
+)
+
+if (NOT GRADLE_WRAPPER)
+    find_program(GRADLE_WRAPPER
+        NAMES gradlew.bat gradlew
+        PATHS ${ARCHIVE_CODEC_WORKING_DIR}
+    )
+endif()
+
+if (GRADLE_WRAPPER)
+    if (WIN32)
+        set(GRADLE_WRAPPER_CMD ${GRADLE_WRAPPER})
+    else()
+        set(GRADLE_WRAPPER_CMD ${GRADLE_WRAPPER})
+    endif()
+
+    add_custom_command(OUTPUT ${GENERATED_CPP_CODECS}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${ARCHIVE_CODEC_TARGET_DIR}
+        COMMAND ${CMAKE_COMMAND} -E env 
+            JAVA_HOME=$ENV{JAVA_HOME} 
+            BUILD_JAVA_HOME=$ENV{BUILD_JAVA_HOME} 
+            BUILD_JAVA_VERSION=$ENV{BUILD_JAVA_VERSION}
+            ${GRADLE_WRAPPER_CMD} 
+            -Dcodec.target.dir=${ARCHIVE_CODEC_TARGET_DIR}
+            :aeron-archive:generateCppCodecs 
+            --no-daemon 
+            --console=plain 
+            -q
+        DEPENDS ${CODEC_SCHEMA} ${SBE_XSD}
+        WORKING_DIRECTORY ${ARCHIVE_CODEC_WORKING_DIR}
+        COMMENT "Generating C++ Archive codecs from SBE XML schema")
+
+    add_custom_target(archive_cpp_codecs DEPENDS ${GENERATED_CPP_CODECS})
+else()
+    message(WARNING "Gradle wrapper not found, Archive C++ codecs will not be generated automatically")
+    add_custom_target(archive_cpp_codecs)
+endif()
+
 SET(HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/client/archive/AeronArchive.h
     ${CMAKE_CURRENT_SOURCE_DIR}/client/archive/ArchiveContext.h
@@ -37,8 +96,11 @@ target_include_directories(aeron_archive_wrapper
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
     "$<BUILD_INTERFACE:${AERON_C_ARCHIVE_SOURCE_PATH}>"
     "$<BUILD_INTERFACE:${AERON_CLIENT_WRAPPER_SOURCE_PATH}>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>"
     "$<INSTALL_INTERFACE:include/wrapper>"
 )
+
+add_dependencies(aeron_archive_wrapper archive_cpp_codecs)
 
 target_sources(aeron_archive_wrapper INTERFACE "$<BUILD_INTERFACE:${HEADERS}>")
 

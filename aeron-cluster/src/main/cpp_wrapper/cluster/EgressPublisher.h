@@ -2,20 +2,20 @@
 #include <memory>
 #include <vector>
 #include <string>
-#include "../client/AeronCluster.h"
+#include "client/AeronCluster.h"
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/AtomicBuffer.h"
 #include "util/ExpandableArrayBuffer.h"
-#include "util/ArrayUtil.h"
+// ArrayUtil not needed in C++ wrapper
 #include "util/DirectBuffer.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SessionEvent.h"
-#include "generated/aeron_cluster_client/Challenge.h"
-#include "generated/aeron_cluster_client/NewLeaderEvent.h"
-#include "generated/aeron_cluster_client/AdminResponse.h"
-#include "generated/aeron_cluster_client/EventCode.h"
-#include "generated/aeron_cluster_client/AdminRequestType.h"
-#include "generated/aeron_cluster_client/AdminResponseCode.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionEvent.h"
+#include "generated/aeron_cluster_codecs/Challenge.h"
+#include "generated/aeron_cluster_codecs/NewLeaderEvent.h"
+#include "generated/aeron_cluster_codecs/AdminResponse.h"
+#include "generated/aeron_cluster_codecs/EventCode.h"
+#include "generated/aeron_cluster_codecs/AdminRequestType.h"
+#include "generated/aeron_cluster_codecs/AdminResponseCode.h"
 
 namespace aeron { namespace cluster
 {
@@ -25,7 +25,8 @@ using namespace aeron::cluster::codecs;
 using namespace aeron::util;
 using namespace aeron::cluster::client;
 
-class ClusterSession; // Forward declaration
+// Forward declaration - full definition needed in implementation
+class ClusterSession;
 
 class EgressPublisher
 {
@@ -58,7 +59,9 @@ public:
 
 private:
     static constexpr std::int32_t SEND_ATTEMPTS = 3;
-    static constexpr std::int32_t MAX_ENCODED_MEMBERSHIP_QUERY_LENGTH = ClusterSession::MAX_ENCODED_MEMBERSHIP_QUERY_LENGTH;
+    // MAX_ENCODED_MEMBERSHIP_QUERY_LENGTH is defined in ClusterSession.h
+    // Using a local constant to avoid dependency on incomplete type
+    static constexpr std::int32_t MAX_ENCODED_MEMBERSHIP_QUERY_LENGTH = 4 * 1024; // Same as ClusterSession::MAX_ENCODED_MEMBERSHIP_QUERY_LENGTH
 
     BufferClaim m_bufferClaim;
     ExpandableArrayBuffer m_buffer;
@@ -71,6 +74,10 @@ private:
 };
 
 // Implementation
+// Note: ClusterSession must be fully defined when these inline functions are instantiated.
+// Since ClusterSession.h includes EgressPublisher.h, ClusterSession will be fully defined
+// when these functions are actually used.
+
 inline EgressPublisher::EgressPublisher(std::int64_t leaderHeartbeatTimeoutNs) :
     m_buffer(MAX_ENCODED_MEMBERSHIP_QUERY_LENGTH),
     m_leaderHeartbeatTimeoutNs(leaderHeartbeatTimeoutNs)
@@ -97,7 +104,7 @@ inline bool EgressPublisher::sendEvent(
         if (position > 0)
         {
             m_sessionEventEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .clusterSessionId(session.id())
                 .correlationId(session.correlationId())
                 .leadershipTermId(leadershipTermId)
@@ -118,14 +125,16 @@ inline bool EgressPublisher::sendEvent(
 
 inline bool EgressPublisher::sendChallenge(ClusterSession& session, const std::vector<std::uint8_t>& encodedChallenge)
 {
+    AtomicBuffer challengeBuffer;
+    challengeBuffer.wrap(m_buffer.buffer(), m_buffer.capacity());
     m_challengeEncoder
-        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .wrapAndApplyHeader(reinterpret_cast<char *>(challengeBuffer.buffer()), 0, challengeBuffer.capacity())
         .clusterSessionId(session.id())
         .correlationId(session.correlationId());
     
     if (!encodedChallenge.empty())
     {
-        m_challengeEncoder.putEncodedCredentials(encodedChallenge.data(), encodedChallenge.size());
+        m_challengeEncoder.putEncodedChallenge(reinterpret_cast<const char *>(encodedChallenge.data()), static_cast<std::uint32_t>(encodedChallenge.size()));
     }
 
     const std::int32_t length = static_cast<std::int32_t>(
@@ -165,11 +174,11 @@ inline bool EgressPublisher::newLeader(
         if (position > 0)
         {
             m_newLeaderEventEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .clusterSessionId(session.id())
                 .leadershipTermId(leadershipTermId)
                 .leaderMemberId(leaderMemberId)
-                .ingressEndpoints(ingressEndpoints);
+                .putIngressEndpoints(ingressEndpoints.data(), static_cast<std::uint32_t>(ingressEndpoints.length()));
 
             m_bufferClaim.commit();
             return true;
@@ -187,13 +196,15 @@ inline bool EgressPublisher::sendAdminResponse(
     AdminResponseCode::Value responseCode,
     const std::string& message)
 {
+    AtomicBuffer adminBuffer;
+    adminBuffer.wrap(m_buffer.buffer(), m_buffer.capacity());
     m_adminResponseEncoder
-        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .wrapAndApplyHeader(reinterpret_cast<char *>(adminBuffer.buffer()), 0, adminBuffer.capacity())
         .clusterSessionId(session.id())
         .correlationId(correlationId)
         .requestType(adminRequestType)
         .responseCode(responseCode)
-        .message(message)
+        .putMessage(message.data(), static_cast<std::uint32_t>(message.length()))
         .putPayload(nullptr, 0);
 
     const std::int32_t length = static_cast<std::int32_t>(

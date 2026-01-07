@@ -22,12 +22,15 @@
 #include "ClusterExceptions.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/logbuffer/Header.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SessionMessageHeader.h"
-#include "generated/aeron_cluster_client/SessionEvent.h"
-#include "generated/aeron_cluster_client/NewLeaderEvent.h"
-#include "generated/aeron_cluster_client/AdminResponse.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionEvent.h"
+#include "generated/aeron_cluster_codecs/NewLeaderEvent.h"
+#include "generated/aeron_cluster_codecs/AdminResponse.h"
 #include "AeronCluster.h"
+
+// Forward declaration for test fixture (only defined in test files, in global namespace)
+class EgressAdapterTest;
 
 namespace aeron { namespace cluster { namespace client
 {
@@ -41,6 +44,9 @@ using namespace aeron::cluster::codecs;
  */
 class EgressAdapter
 {
+    // Allow test classes to access private onFragment method for 1:1 test translation
+    friend class ::EgressAdapterTest;
+
 public:
     /**
      * Construct an adapter for cluster egress which consumes from the subscription and dispatches to the
@@ -98,10 +104,11 @@ public:
         return m_subscription->poll(m_fragmentAssembler.handler(), m_fragmentLimit);
     }
 
-private:
+public:
+    // Made public for 1:1 test translation (friend declaration not working reliably)
     void onFragment(AtomicBuffer &buffer, std::int32_t offset, std::int32_t length, Header &header)
     {
-        m_messageHeaderDecoder.wrap(buffer, offset);
+        m_messageHeaderDecoder.wrap(reinterpret_cast<char *>(buffer.buffer()), offset, MessageHeader::sbeSchemaVersion(), buffer.capacity());
 
         const std::int32_t templateId = m_messageHeaderDecoder.templateId();
         const std::int32_t schemaId = m_messageHeaderDecoder.schemaId();
@@ -128,11 +135,12 @@ private:
         {
             case SessionMessageHeader::SBE_TEMPLATE_ID:
             {
-                m_sessionMessageHeaderDecoder.wrap(
-                    buffer,
+                m_sessionMessageHeaderDecoder.wrapForDecode(
+                    reinterpret_cast<char *>(buffer.buffer()),
                     offset + MessageHeader::encodedLength(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.version());
+                    m_messageHeaderDecoder.version(),
+                    buffer.capacity());
 
                 const std::int64_t sessionId = m_sessionMessageHeaderDecoder.clusterSessionId();
                 if (sessionId == m_clusterSessionId)
@@ -150,11 +158,12 @@ private:
 
             case SessionEvent::SBE_TEMPLATE_ID:
             {
-                m_sessionEventDecoder.wrap(
-                    buffer,
+                m_sessionEventDecoder.wrapForDecode(
+                    reinterpret_cast<char *>(buffer.buffer()),
                     offset + MessageHeader::encodedLength(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.version());
+                    m_messageHeaderDecoder.version(),
+                    buffer.capacity());
 
                 const std::int64_t sessionId = m_sessionEventDecoder.clusterSessionId();
                 if (sessionId == m_clusterSessionId)
@@ -172,11 +181,12 @@ private:
 
             case NewLeaderEvent::SBE_TEMPLATE_ID:
             {
-                m_newLeaderEventDecoder.wrap(
-                    buffer,
+                m_newLeaderEventDecoder.wrapForDecode(
+                    reinterpret_cast<char *>(buffer.buffer()),
                     offset + MessageHeader::encodedLength(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.version());
+                    m_messageHeaderDecoder.version(),
+                    buffer.capacity());
 
                 const std::int64_t sessionId = m_newLeaderEventDecoder.clusterSessionId();
                 if (sessionId == m_clusterSessionId)
@@ -192,11 +202,12 @@ private:
 
             case AdminResponse::SBE_TEMPLATE_ID:
             {
-                m_adminResponseDecoder.wrap(
-                    buffer,
+                m_adminResponseDecoder.wrapForDecode(
+                    reinterpret_cast<char *>(buffer.buffer()),
                     offset + MessageHeader::encodedLength(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.version());
+                    m_messageHeaderDecoder.version(),
+                    buffer.capacity());
 
                 const std::int64_t sessionId = m_adminResponseDecoder.clusterSessionId();
                 if (sessionId == m_clusterSessionId)

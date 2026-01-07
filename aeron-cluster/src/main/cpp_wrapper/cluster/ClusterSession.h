@@ -12,12 +12,12 @@
 #include "concurrent/logbuffer/Header.h"
 #include "util/DirectBuffer.h"
 #include "util/Exceptions.h"
-#include "../client/ClusterExceptions.h"
-#include "../client/ClusterEvent.h"
-#include "aeron_cluster/CloseReason.h"
-#include "aeron_cluster/EventCode.h"
-#include "archive/client/AeronArchive.h"
-#include "../service/ClusterCounters.h"
+#include "client/ClusterExceptions.h"
+#include "client/ClusterEvent.h"
+#include "generated/aeron_cluster_codecs/CloseReason.h"
+#include "generated/aeron_cluster_codecs/EventCode.h"
+#include "client/archive/AeronArchive.h"
+#include "service/ClusterCounters.h"
 #include "concurrent/errors/DistinctErrorLog.h"
 #include "ClusterClientSession.h"
 #include "LogPublisher.h"
@@ -82,15 +82,15 @@ public:
 
     void close(std::shared_ptr<Aeron> aeron, const exception_handler_t& errorHandler, const std::string& reason);
 
-    std::int64_t id() const override;
+    std::int64_t id() override;
 
-    std::vector<std::uint8_t> encodedPrincipal() const override;
+    std::vector<std::uint8_t> encodedPrincipal() override;
 
-    bool isOpen() const override;
+    bool isOpen() override;
 
-    std::shared_ptr<Publication> responsePublication() const override;
+    std::shared_ptr<Publication> responsePublication() override;
 
-    std::int64_t timeOfLastActivityNs() const override;
+    std::int64_t timeOfLastActivityNs() override;
 
     void timeOfLastActivityNs(std::int64_t timeNs);
 
@@ -251,27 +251,27 @@ inline void ClusterSession::close(
     state(ClusterSessionState::CLOSED, reason);
 }
 
-inline std::int64_t ClusterSession::id() const
+inline std::int64_t ClusterSession::id()
 {
     return m_id;
 }
 
-inline std::vector<std::uint8_t> ClusterSession::encodedPrincipal() const
+inline std::vector<std::uint8_t> ClusterSession::encodedPrincipal()
 {
     return m_encodedPrincipal;
 }
 
-inline bool ClusterSession::isOpen() const
+inline bool ClusterSession::isOpen()
 {
     return ClusterSessionState::OPEN == m_state;
 }
 
-inline std::shared_ptr<Publication> ClusterSession::responsePublication() const
+inline std::shared_ptr<Publication> ClusterSession::responsePublication()
 {
     return m_responsePublication;
 }
 
-inline std::int64_t ClusterSession::timeOfLastActivityNs() const
+inline std::int64_t ClusterSession::timeOfLastActivityNs()
 {
     return m_timeOfLastActivityNs;
 }
@@ -714,6 +714,229 @@ inline void ClusterSession::logStateChange(
     //     oldState + " -> " + newState + " " + reason);
 }
 
-}}
+}
 
+// Implementation of LogPublisher and EgressPublisher functions that need ClusterSession's full definition
+// These are placed here to resolve circular dependency
+
+// LogPublisher::appendSessionOpen
+inline std::int64_t LogPublisher::appendSessionOpen(
+    ClusterSession& session,
+    std::int64_t leadershipTermId,
+    std::int64_t timestamp)
+{
+    std::int64_t position;
+    const std::vector<std::uint8_t> encodedPrincipal = session.encodedPrincipal();
+    const std::string channel = session.responseChannel();
+
+    m_sessionOpenEvent
+        .wrapAndApplyHeader(reinterpret_cast<char *>(m_expandableArrayBuffer.buffer()), 0, m_expandableArrayBuffer.capacity())
+        .leadershipTermId(leadershipTermId)
+        .clusterSessionId(session.id())
+        .correlationId(session.correlationId())
+        .timestamp(timestamp)
+        .responseStreamId(session.responseStreamId())
+        .responseChannel(channel)
+        .putEncodedPrincipal(reinterpret_cast<const char *>(encodedPrincipal.data()), static_cast<std::uint32_t>(encodedPrincipal.size()));
+
+    const std::int32_t length = MessageHeader::encodedLength() + m_sessionOpenEvent.encodedLength();
+
+    int attempts = LogPublisher::SEND_ATTEMPTS;
+    do
+    {
+        AtomicBuffer expandableBuffer;
+        expandableBuffer.wrap(m_expandableArrayBuffer.buffer(), m_expandableArrayBuffer.capacity());
+        position = m_publication->offer(expandableBuffer, 0, length);
+        if (position > 0)
+        {
+            break;
+        }
+
+        LogPublisher::checkResult(position, *m_publication);
+    }
+    while (--attempts > 0);
+
+    return position;
+}
+
+// LogPublisher::appendSessionClose
+inline bool LogPublisher::appendSessionClose(
+    std::int32_t memberId,
+    ClusterSession& session,
+    std::int64_t leadershipTermId,
+    std::int64_t timestamp,
+    std::chrono::milliseconds::rep timeUnit)
+{
+    const std::int32_t length = MessageHeader::encodedLength() + SessionCloseEvent::SBE_BLOCK_LENGTH;
+
+    int attempts = LogPublisher::SEND_ATTEMPTS;
+    do
+    {
+        const std::int64_t position = m_publication->tryClaim(length, m_bufferClaim);
+        if (position > 0)
+        {
+            m_sessionCloseEvent
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
+                .leadershipTermId(leadershipTermId)
+                .clusterSessionId(session.id())
+                .timestamp(timestamp)
+                .closeReason(session.closeReason());
+
+            m_bufferClaim.commit();
+            return true;
+        }
+
+        LogPublisher::checkResult(position, *m_publication);
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+// EgressPublisher::sendEvent
+inline bool EgressPublisher::sendEvent(
+    ClusterSession& session,
+    std::int64_t leadershipTermId,
+    std::int32_t leaderMemberId,
+    EventCode::Value code,
+    const std::string& detail)
+{
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() +
+        SessionEvent::SBE_BLOCK_LENGTH +
+        SessionEvent::detailHeaderLength() +
+        detail.length());
+
+    int attempts = EgressPublisher::SEND_ATTEMPTS;
+    do
+    {
+        const std::int64_t position = session.tryClaim(length, m_bufferClaim);
+        if (position > 0)
+        {
+            m_sessionEventEncoder
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
+                .clusterSessionId(session.id())
+                .correlationId(session.correlationId())
+                .leadershipTermId(leadershipTermId)
+                .leaderMemberId(leaderMemberId)
+                .code(code)
+                .version(client::AeronCluster::Configuration::PROTOCOL_SEMANTIC_VERSION)
+                .leaderHeartbeatTimeoutNs(m_leaderHeartbeatTimeoutNs)
+                .putDetail(detail.data(), static_cast<std::uint32_t>(detail.length()));
+
+            m_bufferClaim.commit();
+            return true;
+        }
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+// EgressPublisher::sendChallenge
+inline bool EgressPublisher::sendChallenge(ClusterSession& session, const std::vector<std::uint8_t>& encodedChallenge)
+{
+    AtomicBuffer challengeBuffer;
+    challengeBuffer.wrap(m_buffer.buffer(), m_buffer.capacity());
+    m_challengeEncoder
+        .wrapAndApplyHeader(reinterpret_cast<char *>(challengeBuffer.buffer()), 0, challengeBuffer.capacity())
+        .clusterSessionId(session.id())
+        .correlationId(session.correlationId());
+    
+    if (!encodedChallenge.empty())
+    {
+        m_challengeEncoder.putEncodedChallenge(reinterpret_cast<const char *>(encodedChallenge.data()), static_cast<std::uint32_t>(encodedChallenge.size()));
+    }
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + m_challengeEncoder.encodedLength());
+
+    int attempts = EgressPublisher::SEND_ATTEMPTS;
+    do
+    {
+        util::DirectBuffer directBuffer(m_buffer.buffer(), m_buffer.capacity());
+        const std::int64_t position = session.offer(directBuffer, 0, length);
+        if (position > 0)
+        {
+            return true;
+        }
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+// EgressPublisher::newLeader
+inline bool EgressPublisher::newLeader(
+    ClusterSession& session,
+    std::int64_t leadershipTermId,
+    std::int32_t leaderMemberId,
+    const std::string& ingressEndpoints)
+{
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() +
+        NewLeaderEvent::SBE_BLOCK_LENGTH +
+        NewLeaderEvent::ingressEndpointsHeaderLength() +
+        ingressEndpoints.length());
+
+    int attempts = EgressPublisher::SEND_ATTEMPTS;
+    do
+    {
+        const std::int64_t position = session.tryClaim(length, m_bufferClaim);
+        if (position > 0)
+        {
+            m_newLeaderEventEncoder
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
+                .clusterSessionId(session.id())
+                .leadershipTermId(leadershipTermId)
+                .leaderMemberId(leaderMemberId)
+                .putIngressEndpoints(ingressEndpoints.data(), static_cast<std::uint32_t>(ingressEndpoints.length()));
+
+            m_bufferClaim.commit();
+            return true;
+        }
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+// EgressPublisher::sendAdminResponse
+inline bool EgressPublisher::sendAdminResponse(
+    ClusterSession& session,
+    std::int64_t correlationId,
+    AdminRequestType::Value adminRequestType,
+    AdminResponseCode::Value responseCode,
+    const std::string& message)
+{
+    AtomicBuffer adminBuffer;
+    adminBuffer.wrap(m_buffer.buffer(), m_buffer.capacity());
+    m_adminResponseEncoder
+        .wrapAndApplyHeader(reinterpret_cast<char *>(adminBuffer.buffer()), 0, adminBuffer.capacity())
+        .clusterSessionId(session.id())
+        .correlationId(correlationId)
+        .requestType(adminRequestType)
+        .responseCode(responseCode)
+        .putMessage(message.data(), static_cast<std::uint32_t>(message.length()))
+        .putPayload(nullptr, 0);
+
+    const std::int32_t length = static_cast<std::int32_t>(
+        MessageHeader::encodedLength() + m_adminResponseEncoder.encodedLength());
+
+    int attempts = EgressPublisher::SEND_ATTEMPTS;
+    do
+    {
+        util::DirectBuffer directBuffer(m_buffer.buffer(), m_buffer.capacity());
+        const std::int64_t position = session.offer(directBuffer, 0, length);
+        if (position > 0)
+        {
+            return true;
+        }
+    }
+    while (--attempts > 0);
+
+    return false;
+}
+
+}
 

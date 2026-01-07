@@ -9,7 +9,7 @@
 #include "Image.h"
 #include "../client/AeronCluster.h"
 #include "../client/ClusterExceptions.h"
-#include "aeron_cluster/CloseReason.h"
+#include "generated/aeron_cluster_codecs/CloseReason.h"
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/logbuffer/Header.h"
 #include "util/DirectBuffer.h"

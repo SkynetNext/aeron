@@ -5,29 +5,31 @@
 #include <chrono>
 #include "ExclusivePublication.h"
 #include "Publication.h"
-#include "../client/ClusterExceptions.h"
-#include "../service/ClusterClock.h"
+#include "client/ClusterExceptions.h"
+#include "service/ClusterClock.h"
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/AtomicBuffer.h"
 #include "util/CloseHelper.h"
 #include "util/BitUtil.h"
-#include "protocol/DataHeaderFlyweight.h"
+#include "concurrent/logbuffer/DataFrameHeader.h"
 #include "concurrent/logbuffer/FrameDescriptor.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SessionMessageHeader.h"
-#include "generated/aeron_cluster_client/SessionOpenEvent.h"
-#include "generated/aeron_cluster_client/SessionCloseEvent.h"
-#include "generated/aeron_cluster_client/TimerEvent.h"
-#include "generated/aeron_cluster_client/ClusterActionRequest.h"
-#include "generated/aeron_cluster_client/NewLeadershipTermEvent.h"
-#include "generated/aeron_cluster_client/ClusterAction.h"
-#include "../client/AeronCluster.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionOpenEvent.h"
+#include "generated/aeron_cluster_codecs/SessionCloseEvent.h"
+#include "generated/aeron_cluster_codecs/TimerEvent.h"
+#include "generated/aeron_cluster_codecs/ClusterActionRequest.h"
+#include "generated/aeron_cluster_codecs/NewLeadershipTermEvent.h"
+#include "generated/aeron_cluster_codecs/ClusterAction.h"
+#include "client/AeronCluster.h"
 
 namespace aeron { namespace cluster
 {
 using namespace aeron::concurrent;
 using namespace aeron::concurrent::logbuffer;
 using namespace aeron::cluster::codecs;
+using namespace aeron::cluster::client;
+using namespace aeron::cluster::service;
 using namespace aeron::util;
 
 class ClusterSession; // Forward declaration
@@ -94,7 +96,7 @@ public:
 private:
     static constexpr std::int32_t SEND_ATTEMPTS = 3;
 
-    static void checkResult(std::int64_t position, Publication& publication);
+    static void checkResult(std::int64_t position, ExclusivePublication& publication);
 
     MessageHeader m_messageHeader;
     SessionMessageHeader m_sessionHeader;
@@ -113,6 +115,10 @@ private:
 };
 
 // Implementation
+// Note: ClusterSession must be fully defined when these inline functions are instantiated.
+// Since ClusterSession.h includes LogPublisher.h, ClusterSession will be fully defined
+// when these functions are actually used.
+
 inline LogPublisher::LogPublisher(const std::string& destinationChannel) :
     m_sessionHeaderBufferData(AeronCluster::SESSION_HEADER_LENGTH, 0),
     m_expandableArrayBufferData(1024, 0),
@@ -122,7 +128,7 @@ inline LogPublisher::LogPublisher(const std::string& destinationChannel) :
     m_sessionHeaderBuffer.wrap(m_sessionHeaderBufferData.data(), m_sessionHeaderBufferData.size());
     m_expandableArrayBuffer.wrap(m_expandableArrayBufferData.data(), m_expandableArrayBufferData.size());
     
-    m_sessionHeader.wrapAndApplyHeader(m_sessionHeaderBuffer, 0, m_messageHeader);
+    m_sessionHeader.wrapAndApplyHeader(reinterpret_cast<char *>(m_sessionHeaderBuffer.buffer()), 0, m_sessionHeaderBuffer.capacity());
 }
 
 inline void LogPublisher::publication(std::shared_ptr<ExclusivePublication> publication)
@@ -171,10 +177,10 @@ inline void LogPublisher::addDestination(const std::string& followerLogEndpoint)
     if (m_publication)
     {
         // Create destination URI by appending endpoint to channel
-        ChannelUri channelUri = ChannelUri::parse(m_destinationChannel);
-        channelUri.put("endpoint", followerLogEndpoint);
-        std::string destinationUri = channelUri.toString();
-        m_publication->asyncAddDestination(destinationUri);
+        std::shared_ptr<ChannelUri> channelUri = ChannelUri::parse(m_destinationChannel);
+        channelUri->put("endpoint", followerLogEndpoint);
+        std::string destinationUri = channelUri->toString();
+        m_publication->addDestination(destinationUri);
     }
 }
 
@@ -191,13 +197,13 @@ inline std::int64_t LogPublisher::appendMessage(
         .clusterSessionId(clusterSessionId)
         .timestamp(timestamp);
 
+    // Combine header and message into a single buffer array for offer
+    const concurrent::AtomicBuffer buffers[] = { m_sessionHeaderBuffer, buffer };
     int attempts = SEND_ATTEMPTS;
     std::int64_t position;
     do
     {
-        position = m_publication->offer(
-            m_sessionHeaderBuffer, 0, AeronCluster::SESSION_HEADER_LENGTH,
-            buffer, offset, length, nullptr);
+        position = m_publication->offer(buffers, 2);
 
         if (position > 0)
         {
@@ -211,75 +217,8 @@ inline std::int64_t LogPublisher::appendMessage(
     return position;
 }
 
-inline std::int64_t LogPublisher::appendSessionOpen(
-    ClusterSession& session,
-    std::int64_t leadershipTermId,
-    std::int64_t timestamp)
-{
-    std::int64_t position;
-    const std::vector<std::uint8_t> encodedPrincipal = session.encodedPrincipal();
-    const std::string channel = session.responseChannel();
-
-    m_sessionOpenEvent
-        .wrapAndApplyHeader(m_expandableArrayBuffer, 0, m_messageHeader)
-        .leadershipTermId(leadershipTermId)
-        .clusterSessionId(session.id())
-        .correlationId(session.correlationId())
-        .timestamp(timestamp)
-        .responseStreamId(session.responseStreamId())
-        .responseChannel(channel)
-        .putEncodedPrincipal(encodedPrincipal.data(), 0, static_cast<std::int32_t>(encodedPrincipal.size()));
-
-    const std::int32_t length = MessageHeader::encodedLength() + m_sessionOpenEvent.encodedLength();
-
-    int attempts = SEND_ATTEMPTS;
-    do
-    {
-        position = m_publication->offer(m_expandableArrayBuffer, 0, length, nullptr);
-        if (position > 0)
-        {
-            break;
-        }
-
-        checkResult(position, *m_publication);
-    }
-    while (--attempts > 0);
-
-    return position;
-}
-
-inline bool LogPublisher::appendSessionClose(
-    std::int32_t memberId,
-    ClusterSession& session,
-    std::int64_t leadershipTermId,
-    std::int64_t timestamp,
-    std::chrono::milliseconds::rep timeUnit)
-{
-    const std::int32_t length = MessageHeader::encodedLength() + SessionCloseEvent::SBE_BLOCK_LENGTH;
-
-    int attempts = SEND_ATTEMPTS;
-    do
-    {
-        const std::int64_t position = m_publication->tryClaim(length, m_bufferClaim);
-        if (position > 0)
-        {
-            m_sessionCloseEvent
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeader)
-                .leadershipTermId(leadershipTermId)
-                .clusterSessionId(session.id())
-                .timestamp(timestamp)
-                .closeReason(session.closeReason());
-
-            m_bufferClaim.commit();
-            return true;
-        }
-
-        checkResult(position, *m_publication);
-    }
-    while (--attempts > 0);
-
-    return false;
-}
+// Implementation of appendSessionOpen and appendSessionClose moved to ClusterSession.h
+// to resolve circular dependency - these functions need ClusterSession's full definition
 
 inline std::int64_t LogPublisher::appendTimer(
     std::int64_t correlationId,
@@ -296,7 +235,7 @@ inline std::int64_t LogPublisher::appendTimer(
         if (position > 0)
         {
             m_timerEvent
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeader)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .leadershipTermId(leadershipTermId)
                 .correlationId(correlationId)
                 .timestamp(timestamp);
@@ -319,7 +258,7 @@ inline bool LogPublisher::appendClusterAction(
     std::int32_t flags)
 {
     const std::int32_t length = MessageHeader::encodedLength() + ClusterActionRequest::SBE_BLOCK_LENGTH;
-    const std::int32_t fragmentLength = DataHeaderFlyweight::HEADER_LENGTH + length;
+    const std::int32_t fragmentLength = DataFrameHeader::LENGTH + length;
     const std::int32_t alignedFragmentLength = BitUtil::align(fragmentLength, FrameDescriptor::FRAME_ALIGNMENT);
 
     int attempts = SEND_ATTEMPTS;
@@ -331,7 +270,7 @@ inline bool LogPublisher::appendClusterAction(
         if (position > 0)
         {
             m_clusterActionRequest.wrapAndApplyHeader(
-                m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeader)
+                reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .leadershipTermId(leadershipTermId)
                 .logPosition(logPosition)
                 .timestamp(timestamp)
@@ -359,7 +298,7 @@ inline bool LogPublisher::appendNewLeadershipTermEvent(
     std::int32_t appVersion)
 {
     const std::int32_t length = MessageHeader::encodedLength() + NewLeadershipTermEvent::SBE_BLOCK_LENGTH;
-    const std::int32_t fragmentLength = DataHeaderFlyweight::HEADER_LENGTH + length;
+    const std::int32_t fragmentLength = DataFrameHeader::LENGTH + length;
     const std::int32_t alignedFragmentLength = BitUtil::align(fragmentLength, FrameDescriptor::FRAME_ALIGNMENT);
 
     int attempts = SEND_ATTEMPTS;
@@ -371,7 +310,7 @@ inline bool LogPublisher::appendNewLeadershipTermEvent(
         if (position > 0)
         {
             m_newLeadershipTermEvent.wrapAndApplyHeader(
-                m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeader)
+                reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .leadershipTermId(leadershipTermId)
                 .logPosition(logPosition)
                 .timestamp(timestamp)
@@ -392,14 +331,14 @@ inline bool LogPublisher::appendNewLeadershipTermEvent(
     return false;
 }
 
-inline void LogPublisher::checkResult(std::int64_t position, Publication& publication)
+inline void LogPublisher::checkResult(std::int64_t position, ExclusivePublication& publication)
 {
-    if (position == Publication::CLOSED)
+    if (position == PUBLICATION_CLOSED)
     {
         throw ClusterException("log publication is closed", SOURCEINFO);
     }
 
-    if (position == Publication::MAX_POSITION_EXCEEDED)
+    if (position == MAX_POSITION_EXCEEDED)
     {
         throw ClusterException(
             "log publication at max position: term-length=" + std::to_string(publication.termBufferLength()), SOURCEINFO);

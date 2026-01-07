@@ -64,9 +64,8 @@ public:
         m_headerBuffer(m_headerBufferData.data(), m_headerBufferData.size())
     {
         SessionMessageHeader sessionMessageHeaderEncoder;
-        MessageHeader messageHeaderEncoder;
         sessionMessageHeaderEncoder
-            .wrapAndApplyHeader(m_headerBuffer, 0, messageHeaderEncoder)
+            .wrapAndApplyHeader(reinterpret_cast<char *>(m_headerBuffer.buffer()), 0, m_headerBuffer.capacity())
             .leadershipTermId(leadershipTermId)
             .clusterSessionId(clusterSessionId)
             .timestamp(aeron::NULL_VALUE);

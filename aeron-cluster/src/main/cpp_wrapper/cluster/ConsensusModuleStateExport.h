@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include "aeron_cluster/CloseReason.h"
+#include "generated/aeron_cluster_codecs/CloseReason.h"
 
 namespace aeron { namespace cluster {
 

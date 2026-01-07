@@ -877,7 +877,7 @@ project(':aeron-cluster') {
         systemProperties(
             'sbe.output.dir': generatedCppDir,
             'sbe.target.language': 'Cpp',
-            'sbe.target.namespace': 'aeron.cluster.client',
+            'sbe.target.namespace': 'aeron.cluster.codecs',
             'sbe.validation.xsd': sbeFile,
             'sbe.validation.stop.on.error': 'true')
         args = [codecsFile, markCodecsFile, nodeStateCodecsFile]

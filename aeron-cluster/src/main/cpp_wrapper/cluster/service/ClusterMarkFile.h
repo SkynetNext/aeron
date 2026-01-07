@@ -2,29 +2,32 @@
 
 #include <memory>
 #include <string>
-#include <filesystem>
 #include <functional>
 #include <cstdint>
+#include <limits>
 #include "../client/ClusterExceptions.h"
 #include "util/Exceptions.h"
 #include "util/BitUtil.h"
-#include "util/IoUtil.h"
+// TODO: IoUtil not yet implemented in C++ wrapper
+// #include "util/IoUtil.h"
 #include "util/SemanticVersion.h"
-#include "util/SystemUtil.h"
+// TODO: SystemUtil not yet implemented in C++ wrapper
+// #include "util/SystemUtil.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/EpochClock.h"
 #include "concurrent/UnsafeBuffer.h"
-#include "logbuffer/LogBufferDescriptor.h"
-#include "generated/aeron_cluster_mark/MessageHeader.h"
-#include "generated/aeron_cluster_mark/MarkFileHeader.h"
-#include "generated/aeron_cluster_mark/ClusterComponentType.h"
+// TODO: LogBufferDescriptor not yet implemented in C++ wrapper
+// #include "logbuffer/LogBufferDescriptor.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/MarkFileHeader.h"
+#include "generated/aeron_cluster_codecs/ClusterComponentType.h"
 #include "ClusterNodeControlProperties.h"
 
 namespace aeron { namespace cluster { namespace service {
 
 using namespace aeron::concurrent;
 using namespace aeron::util;
-using namespace aeron::cluster::codecs::mark;
+using namespace aeron::cluster::codecs;
 
 // Forward declaration - MarkFile needs to be implemented or available
 class MarkFile;
@@ -53,7 +56,7 @@ public:
      * Create new MarkFile for a cluster component but check if an existing component is active.
      */
     ClusterMarkFile(
-        const std::filesystem::path& file,
+        const std::string& file,
         ClusterComponentType type,
         std::int32_t errorBufferLength,
         std::shared_ptr<EpochClock> epochClock,
@@ -64,7 +67,7 @@ public:
      * Construct to read the status of an existing MarkFile for a cluster component.
      */
     ClusterMarkFile(
-        const std::filesystem::path& directory,
+        const std::string& directory,
         const std::string& filename,
         std::shared_ptr<EpochClock> epochClock,
         std::int64_t timeoutMs,
@@ -79,10 +82,10 @@ public:
 
     void close();
 
-    std::filesystem::path parentDirectory() const;
+    std::string parentDirectory() const;
 
-    static bool isServiceMarkFile(const std::filesystem::path& path);
-    static bool isConsensusModuleMarkFile(const std::filesystem::path& path);
+    static bool isServiceMarkFile(const std::string& path);
+    static bool isConsensusModuleMarkFile(const std::string& path);
 
     bool isClosed() const;
 
@@ -101,13 +104,13 @@ public:
     void updateActivityTimestamp(std::int64_t nowMs);
     std::int64_t activityTimestampVolatile() const;
 
-    MarkFileHeaderEncoder& encoder();
-    MarkFileHeaderDecoder& decoder();
+    MarkFileHeader& encoder();
+    MarkFileHeader& decoder();
 
     AtomicBuffer errorBuffer() const;
 
     static void saveExistingErrors(
-        const std::filesystem::path& markFile,
+        const std::string& markFile,
         AtomicBuffer& errorBuffer,
         ClusterComponentType type,
         std::ostream& logger);
@@ -130,19 +133,19 @@ public:
 
 private:
     void signalReady(std::int32_t version, std::int64_t activityTimestamp);
-    static std::int32_t headerOffset(const std::filesystem::path& file);
+    static std::int32_t headerOffset(const std::string& file);
     static std::int32_t headerOffset(UnsafeBuffer& headerBuffer);
     static std::shared_ptr<MarkFile> openExistingMarkFile(
-        const std::filesystem::path& directory,
+        const std::string& directory,
         const std::string& filename,
         std::shared_ptr<EpochClock> epochClock,
         std::int64_t timeoutMs,
         std::function<void(const std::string&)> logger);
 
-    static constexpr std::int32_t HEADER_OFFSET = MessageHeaderDecoder::ENCODED_LENGTH;
+    static constexpr std::int32_t HEADER_OFFSET = 16; // MessageHeader::encodedLength()
 
-    MarkFileHeaderDecoder m_headerDecoder;
-    MarkFileHeaderEncoder m_headerEncoder;
+    MarkFileHeader m_headerDecoder;
+    MarkFileHeader m_headerEncoder;
     std::shared_ptr<MarkFile> m_markFile;
     UnsafeBuffer m_buffer;
     UnsafeBuffer m_errorBuffer;
