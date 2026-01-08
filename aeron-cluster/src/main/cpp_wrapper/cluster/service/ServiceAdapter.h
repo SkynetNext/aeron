@@ -6,13 +6,13 @@
 #include "FragmentAssembler.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/logbuffer/Header.h"
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 #include "Cluster.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/JoinLog.h"
-#include "generated/aeron_cluster_client/RequestServiceAck.h"
-#include "generated/aeron_cluster_client/ServiceTerminationPosition.h"
-#include "generated/aeron_cluster_client/BooleanType.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/JoinLog.h"
+#include "generated/aeron_cluster_codecs/RequestServiceAck.h"
+#include "generated/aeron_cluster_codecs/ServiceTerminationPosition.h"
+#include "generated/aeron_cluster_codecs/BooleanType.h"
 
 namespace aeron { namespace cluster { namespace service
 {

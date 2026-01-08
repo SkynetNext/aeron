@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <cstdint>
 #include <string>
-#include "archive/client/AeronArchive.h"
+#include "client/archive/AeronArchive.h"
 #include "archive/codecs/RecordingSignal.h"
 #include "util/CloseHelper.h"
 #include "RecordingReplication.h"

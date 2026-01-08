@@ -6,29 +6,29 @@
 #include <algorithm>
 #include "ExclusivePublication.h"
 #include "Publication.h"
-#include "../client/ClusterExceptions.h"
-#include "CommonContext.h"
+#include "client/ClusterExceptions.h"
+// CommonContext constants are available through ChannelUri.h
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/AtomicBuffer.h"
 #include "util/DirectBuffer.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/CanvassPosition.h"
-#include "generated/aeron_cluster_client/RequestVote.h"
-#include "generated/aeron_cluster_client/Vote.h"
-#include "generated/aeron_cluster_client/NewLeadershipTerm.h"
-#include "generated/aeron_cluster_client/AppendPosition.h"
-#include "generated/aeron_cluster_client/CommitPosition.h"
-#include "generated/aeron_cluster_client/CatchupPosition.h"
-#include "generated/aeron_cluster_client/StopCatchup.h"
-#include "generated/aeron_cluster_client/TerminationPosition.h"
-#include "generated/aeron_cluster_client/TerminationAck.h"
-#include "generated/aeron_cluster_client/BackupQuery.h"
-#include "generated/aeron_cluster_client/BackupResponse.h"
-#include "generated/aeron_cluster_client/HeartbeatRequest.h"
-#include "generated/aeron_cluster_client/HeartbeatResponse.h"
-#include "generated/aeron_cluster_client/ChallengeResponse.h"
-#include "generated/aeron_cluster_client/StandbySnapshot.h"
-#include "generated/aeron_cluster_client/BooleanType.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/CanvassPosition.h"
+#include "generated/aeron_cluster_codecs/RequestVote.h"
+#include "generated/aeron_cluster_codecs/Vote.h"
+#include "generated/aeron_cluster_codecs/NewLeadershipTerm.h"
+#include "generated/aeron_cluster_codecs/AppendPosition.h"
+#include "generated/aeron_cluster_codecs/CommitPosition.h"
+#include "generated/aeron_cluster_codecs/CatchupPosition.h"
+#include "generated/aeron_cluster_codecs/StopCatchup.h"
+#include "generated/aeron_cluster_codecs/TerminationPosition.h"
+#include "generated/aeron_cluster_codecs/TerminationAck.h"
+#include "generated/aeron_cluster_codecs/BackupQuery.h"
+#include "generated/aeron_cluster_codecs/BackupResponse.h"
+#include "generated/aeron_cluster_codecs/HeartbeatRequest.h"
+#include "generated/aeron_cluster_codecs/HeartbeatResponse.h"
+#include "generated/aeron_cluster_codecs/ChallengeResponse.h"
+#include "generated/aeron_cluster_codecs/StandbySnapshot.h"
+#include "generated/aeron_cluster_codecs/BooleanType.h"
 #include "RecordingLog.h"
 
 namespace aeron { namespace cluster
@@ -165,6 +165,7 @@ public:
 private:
     static constexpr std::int32_t SEND_ATTEMPTS = 3;
 
+    static void checkResult(std::int64_t position, ExclusivePublication& publication);
     static void checkResult(std::int64_t position, Publication& publication);
 
     static bool sendPublication(
@@ -208,6 +209,14 @@ inline ConsensusPublisher::ConsensusPublisher() :
     m_bufferData(4096),
     m_buffer(m_bufferData.data(), m_bufferData.size())
 {
+}
+
+inline void ConsensusPublisher::checkResult(std::int64_t position, ExclusivePublication& publication)
+{
+    if (aeron::PUBLICATION_CLOSED == position)
+    {
+        throw ClusterException("publication is closed", SOURCEINFO);
+    }
 }
 
 inline void ConsensusPublisher::checkResult(std::int64_t position, Publication& publication)
@@ -290,7 +299,7 @@ inline void ConsensusPublisher::canvassPosition(
         if (position > 0)
         {
             m_canvassPositionEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .logLeadershipTermId(logLeadershipTermId)
                 .logPosition(logPosition)
                 .leadershipTermId(leadershipTermId)
@@ -328,7 +337,7 @@ inline bool ConsensusPublisher::requestVote(
         if (position > 0)
         {
             m_requestVoteEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .logLeadershipTermId(logLeadershipTermId)
                 .logPosition(logPosition)
                 .candidateTermId(candidateTermId)
@@ -370,7 +379,7 @@ inline void ConsensusPublisher::placeVote(
         if (position > 0)
         {
             m_voteEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .candidateTermId(candidateTermId)
                 .logLeadershipTermId(logLeadershipTermId)
                 .logPosition(logPosition)
@@ -408,7 +417,7 @@ inline void ConsensusPublisher::commitPosition(
         if (position > 0)
         {
             m_commitPositionEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .leadershipTermId(leadershipTermId)
                 .logPosition(logPosition)
                 .leaderMemberId(leaderMemberId);
@@ -454,7 +463,7 @@ inline void ConsensusPublisher::newLeadershipTerm(
         if (position > 0)
         {
             m_newLeadershipTermEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .logLeadershipTermId(logLeadershipTermId)
                 .nextLeadershipTermId(nextLeadershipTermId)
                 .nextTermBaseLogPosition(nextTermBaseLogPosition)
@@ -501,7 +510,7 @@ inline bool ConsensusPublisher::appendPosition(
         if (position > 0)
         {
             m_appendPositionEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .leadershipTermId(leadershipTermId)
                 .logPosition(logPosition)
                 .followerMemberId(followerMemberId)
@@ -543,11 +552,11 @@ inline bool ConsensusPublisher::catchupPosition(
         if (position > 0)
         {
             m_catchupPositionEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .leadershipTermId(leadershipTermId)
                 .logPosition(logPosition)
                 .followerMemberId(followerMemberId)
-                .catchupEndpoint(catchupEndpoint);
+                .putCatchupEndpoint(catchupEndpoint.data(), static_cast<std::uint32_t>(catchupEndpoint.length()));
 
             m_bufferClaim.commit();
             return true;
@@ -580,7 +589,7 @@ inline bool ConsensusPublisher::stopCatchup(
         if (position > 0)
         {
             m_stopCatchupEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .leadershipTermId(leadershipTermId)
                 .followerMemberId(followerMemberId);
 
@@ -615,7 +624,7 @@ inline bool ConsensusPublisher::terminationPosition(
         if (position > 0)
         {
             m_terminationPositionEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .leadershipTermId(leadershipTermId)
                 .logPosition(logPosition);
 
@@ -651,7 +660,7 @@ inline bool ConsensusPublisher::terminationAck(
         if (position > 0)
         {
             m_terminationAckEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .leadershipTermId(leadershipTermId)
                 .logPosition(logPosition)
                 .memberId(memberId);
@@ -681,12 +690,12 @@ inline bool ConsensusPublisher::backupQuery(
     }
 
     m_backupQueryEncoder
-        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .wrapAndApplyHeader(reinterpret_cast<char *>(m_buffer.buffer()), 0, m_buffer.capacity())
         .correlationId(correlationId)
         .responseStreamId(responseStreamId)
         .version(version)
-        .responseChannel(responseChannel)
-        .putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+        .putResponseChannel(responseChannel.data(), static_cast<std::uint32_t>(responseChannel.length()))
+        .putEncodedCredentials(reinterpret_cast<const char *>(encodedCredentials.data()), static_cast<std::uint32_t>(encodedCredentials.size()));
 
     const std::int32_t length = static_cast<std::int32_t>(
         MessageHeader::encodedLength() + m_backupQueryEncoder.encodedLength());
@@ -703,11 +712,11 @@ inline bool ConsensusPublisher::backupResponse(
     const std::string& clusterMembers)
 {
     m_backupResponseEncoder
-        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .wrapAndApplyHeader(reinterpret_cast<char *>(m_buffer.buffer()), 0, m_buffer.capacity())
         .correlationId(session.correlationId())
-        .logRecordingId(recoveryPlan.log.recordingId)
-        .logLeadershipTermId(recoveryPlan.log.leadershipTermId)
-        .logTermBaseLogPosition(recoveryPlan.log.termBaseLogPosition)
+        .logRecordingId(recoveryPlan.log->recordingId)
+        .logLeadershipTermId(recoveryPlan.log->leadershipTermId)
+        .logTermBaseLogPosition(recoveryPlan.log->termBaseLogPosition)
         .lastLeadershipTermId(lastEntry.leadershipTermId)
         .lastTermBaseLogPosition(lastEntry.termBaseLogPosition)
         .commitPositionCounterId(commitPositionCounterId)
@@ -728,7 +737,7 @@ inline bool ConsensusPublisher::backupResponse(
             .serviceId(snapshot.serviceId);
     }
 
-    m_backupResponseEncoder.clusterMembers(clusterMembers);
+    m_backupResponseEncoder.putClusterMembers(clusterMembers.data(), static_cast<std::uint32_t>(clusterMembers.length()));
 
     const std::int32_t length = static_cast<std::int32_t>(
         MessageHeader::encodedLength() + m_backupResponseEncoder.encodedLength());
@@ -748,11 +757,11 @@ inline bool ConsensusPublisher::heartbeatRequest(
     }
 
     m_heartbeatRequestEncoder
-        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .wrapAndApplyHeader(reinterpret_cast<char *>(m_buffer.buffer()), 0, m_buffer.capacity())
         .correlationId(correlationId)
         .responseStreamId(responseStreamId)
-        .responseChannel(responseChannel)
-        .putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+        .putResponseChannel(responseChannel.data(), static_cast<std::uint32_t>(responseChannel.length()))
+        .putEncodedCredentials(reinterpret_cast<const char *>(encodedCredentials.data()), static_cast<std::uint32_t>(encodedCredentials.size()));
 
     const std::int32_t length = static_cast<std::int32_t>(
         MessageHeader::encodedLength() + m_heartbeatRequestEncoder.encodedLength());
@@ -762,7 +771,7 @@ inline bool ConsensusPublisher::heartbeatRequest(
 inline bool ConsensusPublisher::heartbeatResponse(ClusterSession& session)
 {
     m_heartbeatResponseEncoder
-        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .wrapAndApplyHeader(reinterpret_cast<char *>(m_buffer.buffer()), 0, m_buffer.capacity())
         .correlationId(session.correlationId());
 
     const std::int32_t length = static_cast<std::int32_t>(
@@ -777,10 +786,10 @@ inline bool ConsensusPublisher::challengeResponse(
     const std::vector<std::uint8_t>& encodedChallengeResponse)
 {
     m_challengeResponseEncoder
-        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder)
+        .wrapAndApplyHeader(reinterpret_cast<char *>(m_buffer.buffer()), 0, m_buffer.capacity())
         .correlationId(nextCorrelationId)
         .clusterSessionId(clusterSessionId)
-        .putEncodedCredentials(encodedChallengeResponse.data(), encodedChallengeResponse.size());
+        .putEncodedCredentials(reinterpret_cast<const char *>(encodedChallengeResponse.data()), static_cast<std::uint32_t>(encodedChallengeResponse.size()));
 
     const std::int32_t length = static_cast<std::int32_t>(
         MessageHeader::encodedLength() + m_challengeResponseEncoder.encodedLength());
@@ -800,7 +809,7 @@ inline bool ConsensusPublisher::standbySnapshotTaken(
 {
     const std::int32_t snapshotsLength = static_cast<std::int32_t>(snapshots.size());
     m_standbySnapshotEncoder
-        .wrapAndApplyHeader(m_buffer, 0, m_messageHeaderEncoder);
+        .wrapAndApplyHeader(reinterpret_cast<char *>(m_buffer.buffer()), 0, m_buffer.capacity());
 
     m_standbySnapshotEncoder
         .correlationId(correlationId)
@@ -820,12 +829,12 @@ inline bool ConsensusPublisher::standbySnapshotTaken(
             .logPosition(entry.logPosition)
             .timestamp(entry.timestamp)
             .serviceId(entry.serviceId)
-            .archiveEndpoint(archiveEndpoint);
+            .putArchiveEndpoint(archiveEndpoint.data(), static_cast<std::uint32_t>(archiveEndpoint.length()));
     }
 
     m_standbySnapshotEncoder
-        .responseChannel(responseChannel)
-        .putEncodedCredentials(encodedCredentials.data(), encodedCredentials.size());
+        .putResponseChannel(responseChannel.data(), static_cast<std::uint32_t>(responseChannel.length()))
+        .putEncodedCredentials(reinterpret_cast<const char *>(encodedCredentials.data()), static_cast<std::uint32_t>(encodedCredentials.size()));
 
     const std::int32_t encodedLength = static_cast<std::int32_t>(
         MessageHeader::encodedLength() + m_standbySnapshotEncoder.encodedLength());

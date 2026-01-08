@@ -4,19 +4,20 @@
 #include <string>
 #include <functional>
 #include "Subscription.h"
-#include "../client/AeronCluster.h"
-#include "../client/ClusterExceptions.h"
+#include "client/AeronCluster.h"
+#include "client/ClusterExceptions.h"
 #include "ControlledFragmentAssembler.h"
-#include "concurrent/logbuffer/ControlledFragmentHandler.h"
+// ControlledFragmentHandler is replaced by ControlledPollAction in C++
+// #include "concurrent/logbuffer/ControlledFragmentHandler.h"
 #include "concurrent/logbuffer/Header.h"
 #include "concurrent/AtomicBuffer.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SessionConnectRequest.h"
-#include "generated/aeron_cluster_client/SessionCloseRequest.h"
-#include "generated/aeron_cluster_client/SessionMessageHeader.h"
-#include "generated/aeron_cluster_client/SessionKeepAlive.h"
-#include "generated/aeron_cluster_client/ChallengeResponse.h"
-#include "generated/aeron_cluster_client/AdminRequest.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionConnectRequest.h"
+#include "generated/aeron_cluster_codecs/SessionCloseRequest.h"
+#include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionKeepAlive.h"
+#include "generated/aeron_cluster_codecs/ChallengeResponse.h"
+#include "generated/aeron_cluster_codecs/AdminRequest.h"
 
 namespace aeron { namespace cluster
 {
@@ -54,13 +55,13 @@ public:
 
 private:
     std::int32_t m_fragmentPollLimit;
-    MessageHeaderDecoder m_messageHeaderDecoder;
-    SessionConnectRequestDecoder m_connectRequestDecoder;
-    SessionCloseRequestDecoder m_closeRequestDecoder;
-    SessionMessageHeaderDecoder m_sessionMessageHeaderDecoder;
-    SessionKeepAliveDecoder m_sessionKeepAliveDecoder;
-    ChallengeResponseDecoder m_challengeResponseDecoder;
-    AdminRequestDecoder m_adminRequestDecoder;
+    MessageHeader m_messageHeader;
+    SessionConnectRequest m_connectRequest;
+    SessionCloseRequest m_closeRequest;
+    SessionMessageHeader m_sessionMessageHeader;
+    SessionKeepAlive m_sessionKeepAlive;
+    ChallengeResponse m_challengeResponse;
+    AdminRequest m_adminRequest;
     controlled_poll_fragment_handler_t m_onMessageHandler;
     ControlledFragmentAssembler m_udpFragmentAssembler;
     ControlledFragmentAssembler m_ipcFragmentAssembler;
@@ -94,160 +95,17 @@ inline void IngressAdapter::close()
 
     if (subscription)
     {
-        subscription->close();
+        subscription.reset();
     }
 
     if (ipcSubscription)
     {
-        ipcSubscription->close();
+        ipcSubscription.reset();
     }
 }
 
-inline ControlledPollAction IngressAdapter::onMessage(
-    AtomicBuffer& buffer,
-    std::int32_t offset,
-    std::int32_t length,
-    Header& header)
-{
-    m_messageHeaderDecoder.wrap(buffer, offset);
-
-    const std::int32_t schemaId = m_messageHeaderDecoder.sbeSchemaId();
-    const std::int32_t templateId = m_messageHeaderDecoder.sbeTemplateId();
-    const std::int32_t actingVersion = m_messageHeaderDecoder.sbeVersion();
-    const std::int32_t actingBlockLength = m_messageHeaderDecoder.sbeBlockLength();
-    
-    if (schemaId != MessageHeader::sbeSchemaId())
-    {
-        return m_consensusModuleAgent.onExtensionMessage(
-            actingBlockLength, templateId, schemaId, actingVersion, buffer, offset, length, header);
-    }
-
-    if (templateId == SessionMessageHeader::sbeTemplateId())
-    {
-        m_sessionMessageHeaderDecoder.wrap(
-            buffer,
-            offset + MessageHeader::encodedLength(),
-            m_messageHeaderDecoder.sbeBlockLength(),
-            actingVersion);
-
-        return m_consensusModuleAgent.onIngressMessage(
-            m_sessionMessageHeaderDecoder.leadershipTermId(),
-            m_sessionMessageHeaderDecoder.clusterSessionId(),
-            buffer,
-            offset + client::AeronCluster::SESSION_HEADER_LENGTH,
-            length - client::AeronCluster::SESSION_HEADER_LENGTH);
-    }
-
-    switch (templateId)
-    {
-        case SessionConnectRequest::sbeTemplateId():
-        {
-            m_connectRequestDecoder.wrap(
-                buffer,
-                offset + MessageHeader::encodedLength(),
-                m_messageHeaderDecoder.sbeBlockLength(),
-                actingVersion);
-
-            const std::string responseChannel = m_connectRequestDecoder.responseChannel();
-            const std::int32_t credentialsLength = m_connectRequestDecoder.encodedCredentialsLength();
-            std::vector<std::uint8_t> credentials;
-            
-            if (credentialsLength > 0)
-            {
-                credentials.resize(credentialsLength);
-                m_connectRequestDecoder.getEncodedCredentials(credentials.data(), 0, credentialsLength);
-            }
-            else
-            {
-                m_connectRequestDecoder.skipEncodedCredentials();
-            }
-            
-            const std::string clientInfo = m_connectRequestDecoder.clientInfo();
-
-            m_consensusModuleAgent.onSessionConnect(
-                m_connectRequestDecoder.correlationId(),
-                m_connectRequestDecoder.responseStreamId(),
-                m_connectRequestDecoder.version(),
-                responseChannel,
-                credentials,
-                clientInfo,
-                header);
-            break;
-        }
-
-        case SessionCloseRequest::sbeTemplateId():
-        {
-            m_closeRequestDecoder.wrap(
-                buffer,
-                offset + MessageHeader::encodedLength(),
-                m_messageHeaderDecoder.sbeBlockLength(),
-                actingVersion);
-
-            m_consensusModuleAgent.onSessionClose(
-                m_closeRequestDecoder.leadershipTermId(),
-                m_closeRequestDecoder.clusterSessionId());
-            break;
-        }
-
-        case SessionKeepAlive::sbeTemplateId():
-        {
-            m_sessionKeepAliveDecoder.wrap(
-                buffer,
-                offset + MessageHeader::encodedLength(),
-                m_messageHeaderDecoder.sbeBlockLength(),
-                actingVersion);
-
-            m_consensusModuleAgent.onSessionKeepAlive(
-                m_sessionKeepAliveDecoder.leadershipTermId(),
-                m_sessionKeepAliveDecoder.clusterSessionId(),
-                header);
-            break;
-        }
-
-        case ChallengeResponse::sbeTemplateId():
-        {
-            m_challengeResponseDecoder.wrap(
-                buffer,
-                offset + MessageHeader::encodedLength(),
-                m_messageHeaderDecoder.sbeBlockLength(),
-                actingVersion);
-
-            std::vector<std::uint8_t> credentials(m_challengeResponseDecoder.encodedCredentialsLength());
-            m_challengeResponseDecoder.getEncodedCredentials(credentials.data(), 0, credentials.size());
-
-            m_consensusModuleAgent.onIngressChallengeResponse(
-                m_challengeResponseDecoder.correlationId(),
-                m_challengeResponseDecoder.clusterSessionId(),
-                credentials);
-            break;
-        }
-
-        case AdminRequest::sbeTemplateId():
-        {
-            m_adminRequestDecoder.wrap(
-                buffer,
-                offset + MessageHeader::encodedLength(),
-                m_messageHeaderDecoder.sbeBlockLength(),
-                actingVersion);
-
-            const std::int32_t payloadOffset = m_adminRequestDecoder.offset() +
-                m_adminRequestDecoder.encodedLength() +
-                AdminRequest::payloadHeaderLength();
-            
-            m_consensusModuleAgent.onAdminRequest(
-                m_adminRequestDecoder.leadershipTermId(),
-                m_adminRequestDecoder.clusterSessionId(),
-                m_adminRequestDecoder.correlationId(),
-                static_cast<AdminRequestType::Value>(m_adminRequestDecoder.requestType()),
-                buffer,
-                payloadOffset,
-                m_adminRequestDecoder.payloadLength());
-            break;
-        }
-    }
-
-    return ControlledPollAction::CONTINUE;
-}
+// Implementation moved to ConsensusModuleAgent.h to avoid circular dependency
+// inline ControlledPollAction IngressAdapter::onMessage(...)
 
 inline void IngressAdapter::connect(
     std::shared_ptr<Subscription> subscription,

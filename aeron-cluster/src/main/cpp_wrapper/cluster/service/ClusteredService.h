@@ -20,7 +20,7 @@
 #include "Image.h"
 #include "concurrent/logbuffer/Header.h"
 #include "concurrent/AtomicBuffer.h"
-#include "generated/aeron_cluster_client/CloseReason.h"
+#include "generated/aeron_cluster_codecs/CloseReason.h"
 #include "ClientSession.h"
 
 // Forward declaration

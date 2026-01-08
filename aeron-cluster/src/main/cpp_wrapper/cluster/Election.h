@@ -10,29 +10,30 @@
 #include "ChannelUri.h"
 #include "Image.h"
 #include "Subscription.h"
-#include "archive/codecs/RecordingSignal.h"
-#include "../client/ClusterExceptions.h"
-#include "../client/ClusterEvent.h"
-#include "../service/Cluster.h"
+#include "client/archive/AeronArchive.h"  // For RecordingSignal
+#include "client/ClusterExceptions.h"
+#include "client/ClusterEvent.h"
+#include "service/Cluster.h"
 #include "util/Exceptions.h"
 #include "util/CloseHelper.h"
-#include "status/ChannelEndpointStatus.h"
+#include "concurrent/status/StatusIndicatorReader.h"  // For ChannelEndpointStatus
 #include "concurrent/AgentTerminationException.h"
 #include "ElectionState.h"
 #include "ClusterMember.h"
 #include "ConsensusPublisher.h"
-#include "ConsensusModule.h"
+// #include "ConsensusModule.h" // Not yet implemented, using forward declaration
 #include "ConsensusModuleAgent.h"
 #include "LogReplay.h"
 #include "RecordingReplication.h"
 #include "NodeStateFile.h"
 #include "RecordingLog.h"
-#include "CommonContext.h"
-#include "archive/client/AeronArchive.h"
+// CommonContext.h not needed - constants are in Context.h or defined inline
+#include "client/archive/AeronArchive.h"
 
 namespace aeron { namespace cluster {
 
-using namespace aeron::archive::codecs;
+using namespace aeron::archive::client;  // For RecordingSignal
+using namespace aeron::concurrent::status;  // For ChannelEndpointStatus
 using namespace aeron::util;
 
 // Forward declarations
@@ -57,7 +58,7 @@ public:
         std::unordered_map<std::int32_t, ClusterMember*>& clusterMemberByIdMap,
         ClusterMember& thisMember,
         ConsensusPublisher& consensusPublisher,
-        ConsensusModule::Context& ctx,
+        ConsensusModuleContext& ctx,
         ConsensusModuleAgent& consensusModuleAgent);
 
     ClusterMember* leader();
@@ -146,7 +147,7 @@ public:
     std::int64_t notifiedCommitPosition() const;
 
     static void ensureRecordingLogCoherent(
-        ConsensusModule::Context& ctx,
+        ConsensusModuleContext& ctx,
         std::int64_t recordingId,
         std::int64_t initialLogLeadershipTermId,
         std::int64_t initialTermBaseLogPosition,
@@ -232,7 +233,7 @@ private:
     ClusterMember& m_thisMember;
     std::unordered_map<std::int32_t, ClusterMember*>& m_clusterMemberByIdMap;
     ConsensusPublisher& m_consensusPublisher;
-    ConsensusModule::Context& m_ctx;
+    ConsensusModuleContext& m_ctx;
     ConsensusModuleAgent& m_consensusModuleAgent;
     std::int64_t m_initialLogLeadershipTermId;
     std::int64_t m_initialTimeOfLastUpdateNs;
@@ -256,7 +257,7 @@ private:
     std::int64_t m_candidateTermId = 0;
     std::int64_t m_lastPublishedCommitPosition = 0;
     std::int64_t m_lastPublishedAppendPosition = 0;
-    std::int32_t m_logSessionId = 0; // NULL_SESSION_ID
+    std::int32_t m_logSessionId = 0; // NULL_SESSION_ID (0 is the default)
     std::int32_t m_gracefulClosedLeaderId = 0;
     bool m_isFirstInit = true;
     bool m_isLeaderStartup = false;
@@ -439,89 +440,16 @@ inline void Election::handleError(std::int64_t nowNs, const std::exception& ex)
     // TODO: Implement proper exception type checking
 }
 
-inline void Election::onRecordingSignal(
-    std::int64_t correlationId,
-    std::int64_t recordingId,
-    std::int64_t position,
-    RecordingSignal signal)
-{
-    if (ElectionState::INIT == m_state)
-    {
-        return;
-    }
-
-    if (m_logReplication)
-    {
-        m_logReplication->onSignal(correlationId, recordingId, position, signal);
-        m_consensusModuleAgent.logRecordingId(m_logReplication->recordingId());
-    }
-}
+// Implementation moved to ConsensusModuleAgent.h to resolve circular dependency
 
 inline std::int64_t Election::notifiedCommitPosition() const
 {
     return m_notifiedCommitPosition;
 }
 
-inline void Election::state(ElectionState newState, std::int64_t nowNs, const std::string& reason)
-{
-    if (newState != m_state)
-    {
-        if (ElectionState::CANVASS == m_state)
-        {
-            m_isExtendedCanvass = false;
-        }
+// Implementation moved to ConsensusModuleAgent.h to resolve circular dependency
 
-        switch (newState)
-        {
-            case ElectionState::CANVASS:
-                resetMembers();
-                m_consensusModuleAgent.role(service::Cluster::Role::FOLLOWER);
-                break;
-
-            case ElectionState::CANDIDATE_BALLOT:
-                m_consensusModuleAgent.role(service::Cluster::Role::CANDIDATE);
-                break;
-
-            case ElectionState::LEADER_LOG_REPLICATION:
-                m_consensusModuleAgent.role(service::Cluster::Role::LEADER);
-                m_logSessionId = m_consensusModuleAgent.addLogPublication(m_appendPosition);
-                break;
-
-            case ElectionState::FOLLOWER_LOG_REPLICATION:
-            case ElectionState::FOLLOWER_REPLAY:
-                m_consensusModuleAgent.role(service::Cluster::Role::FOLLOWER);
-                break;
-
-            default:
-                break;
-        }
-
-        logStateChange(
-            m_thisMember.id(),
-            m_state,
-            newState,
-            m_leaderMember ? m_leaderMember->id() : aeron::NULL_VALUE,
-            m_candidateTermId,
-            m_leadershipTermId,
-            m_logPosition,
-            m_logLeadershipTermId,
-            m_appendPosition,
-            m_catchupJoinPosition,
-            reason);
-
-        m_state = newState;
-        m_ctx.electionStateCounter()->setRelease(static_cast<std::int64_t>(newState));
-        m_timeOfLastStateChangeNs = nowNs;
-        m_timeOfLastUpdateNs = m_initialTimeOfLastUpdateNs;
-        m_timeOfLastCommitPositionUpdateNs = m_initialTimeOfLastUpdateNs;
-    }
-}
-
-inline void Election::stopCatchup()
-{
-    m_consensusModuleAgent.stopAllCatchups();
-    m_catchupJoinPosition = AeronArchive::NULL_POSITION;
-}
+// Implementation moved to ConsensusModuleAgent.h to resolve circular dependency
 
 inline void Election::resetMembers()
 {
@@ -611,12 +539,12 @@ inline std::int32_t Election::init(std::int64_t nowNs)
         stopLogReplication();
         stopCatchup();
         prepareForNewLeadership(nowNs);
-        m_logSessionId = aeron::NULL_SESSION_ID;
+        m_logSessionId = 0;  // NULL_SESSION_ID
         stopReplay();
 
         if (m_logSubscription)
         {
-            m_logSubscription->close();
+            m_logSubscription.reset();
             m_consensusModuleAgent.awaitLocalSocketsClosed(m_logSubscription->registrationId());
             m_logSubscription.reset();
         }
@@ -971,7 +899,7 @@ inline void Election::onCanvassPosition(
 
         if (logLeadershipTermId < m_leadershipTermId)
         {
-            if (service::Cluster::Role::LEADER == m_consensusModuleAgent.role())
+            if (service::Role::LEADER == m_consensusModuleAgent.role())
             {
                 publishNewLeadershipTerm(
                     *follower,
@@ -1454,7 +1382,7 @@ inline std::int32_t Election::followerCatchupAwait(std::int64_t nowNs)
             state(ElectionState::FOLLOWER_CATCHUP, nowNs, "");
             workCount++;
         }
-        else if (ChannelEndpointStatus::ERRORED == m_logSubscription->channelStatus())
+        else if (ChannelEndpointStatus::CHANNEL_ENDPOINT_ERRORED == m_logSubscription->channelStatus())
         {
             const std::string message = "failed to add catchup log as follower - " + m_logSubscription->channel();
             throw ClusterException(message, SOURCEINFO);
@@ -1502,7 +1430,7 @@ inline std::int32_t Election::followerLogInit(std::int64_t nowNs)
 {
     if (!m_logSubscription)
     {
-        if (aeron::NULL_SESSION_ID != m_logSessionId)
+        if (0 != m_logSessionId)  // NULL_SESSION_ID
         {
             m_logSubscription = addFollowerSubscription();
             addLiveLogDestination();
@@ -1536,7 +1464,7 @@ inline std::int32_t Election::followerLogAwait(std::int64_t nowNs)
             throw TimeoutException("failed to join live log as follower", SOURCEINFO);
         }
     }
-    else if (ChannelEndpointStatus::ERRORED == m_logSubscription->channelStatus())
+    else if (ChannelEndpointStatus::CHANNEL_ENDPOINT_ERRORED == m_logSubscription->channelStatus())
     {
         const std::string message = "failed to add live log as follower - " + m_logSubscription->channel();
         throw ClusterException(message, SOURCEINFO);

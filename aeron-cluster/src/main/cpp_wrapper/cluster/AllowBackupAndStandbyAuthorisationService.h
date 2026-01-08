@@ -1,10 +1,10 @@
 #pragma once
 #include <vector>
 #include "security/AuthorisationService.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/BackupQuery.h"
-#include "generated/aeron_cluster_client/HeartbeatRequest.h"
-#include "generated/aeron_cluster_client/StandbySnapshot.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/BackupQuery.h"
+#include "generated/aeron_cluster_codecs/HeartbeatRequest.h"
+#include "generated/aeron_cluster_codecs/StandbySnapshot.h"
 
 namespace aeron { namespace cluster
 {

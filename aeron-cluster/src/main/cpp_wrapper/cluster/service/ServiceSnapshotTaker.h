@@ -9,8 +9,8 @@
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/IdleStrategy.h"
 #include "concurrent/AgentInvoker.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/ClientSession.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/ClientSession.h"
 
 namespace aeron { namespace cluster { namespace service
 {

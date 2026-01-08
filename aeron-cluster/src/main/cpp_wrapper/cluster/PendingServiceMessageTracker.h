@@ -4,12 +4,12 @@
 #include <functional>
 #include <cstring>
 #include "Counter.h"
-#include "../client/ClusterExceptions.h"
-#include "../service/ClusterClock.h"
+#include "client/ClusterExceptions.h"
+#include "service/ClusterClock.h"
 #include "concurrent/AtomicBuffer.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SessionMessageHeader.h"
-#include "../client/AeronCluster.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
+#include "client/AeronCluster.h"
 
 namespace aeron { namespace cluster
 {
@@ -316,8 +316,8 @@ inline void PendingServiceMessageTracker::enqueueMessage(AtomicBuffer& buffer, s
             headerOffset + SessionMessageHeader::clusterSessionIdEncodingOffset();
         const std::int32_t timestampOffset = headerOffset + SessionMessageHeader::timestampEncodingOffset();
 
-        buffer.putInt64(clusterSessionIdOffset, clusterSessionId, SessionMessageHeader::sbeByteOrder());
-        buffer.putInt64(timestampOffset, std::numeric_limits<std::int64_t>::max(), SessionMessageHeader::sbeByteOrder());
+        buffer.putInt64(clusterSessionIdOffset, clusterSessionId);
+        buffer.putInt64(timestampOffset, std::numeric_limits<std::int64_t>::max());
         
         if (!m_pendingMessages.append(buffer, offset - client::AeronCluster::SESSION_HEADER_LENGTH, 
                                       length + client::AeronCluster::SESSION_HEADER_LENGTH))
@@ -350,12 +350,11 @@ inline void PendingServiceMessageTracker::restoreUncommittedMessages()
     if (m_uncommittedMessages > 0)
     {
         m_pendingMessages.consume(m_leaderMessageSweeper, std::numeric_limits<std::int32_t>::max());
-        m_pendingMessages.forEach(
-            [](AtomicBuffer& buffer, std::int32_t offset, std::int32_t length, std::int32_t headOffset)
-            {
-                return messageReset(buffer, offset, length, headOffset);
-            },
-            std::numeric_limits<std::int32_t>::max());
+        SimpleExpandableRingBuffer::MessageConsumer resetConsumer = [](AtomicBuffer& buffer, std::int32_t offset, std::int32_t length, std::int32_t headOffset)
+        {
+            return messageReset(buffer, offset, length, headOffset);
+        };
+        m_pendingMessages.forEach(resetConsumer, std::numeric_limits<std::int32_t>::max());
         m_uncommittedMessages = 0;
         m_pendingMessageHeadOffset = 0;
     }
@@ -399,12 +398,12 @@ inline void PendingServiceMessageTracker::verify()
                 headerOffset + SessionMessageHeader::clusterSessionIdEncodingOffset();
 
             const std::int64_t clusterSessionId = buffer.getInt64(
-                clusterSessionIdOffset, SessionMessageHeader::sbeByteOrder());
+                clusterSessionIdOffset);
 
             if (clusterSessionId != (m_logServiceSessionId + messageCount))
             {
                 throw ClusterException(
-                    "snapshot has incorrect pending message:" +
+                    std::string("snapshot has incorrect pending message:") +
                     " serviceId=" + std::to_string(m_serviceId) +
                     " nextServiceSessionId=" + std::to_string(m_nextServiceSessionId) +
                     " logServiceSessionId=" + std::to_string(m_logServiceSessionId) +
@@ -421,7 +420,7 @@ inline void PendingServiceMessageTracker::verify()
     if (m_nextServiceSessionId != (m_logServiceSessionId + messageCount + 1))
     {
         throw ClusterException(
-            "snapshot has incorrect pending message state:" +
+            std::string("snapshot has incorrect pending message state:") +
             " serviceId=" + std::to_string(m_serviceId) +
             " nextServiceSessionId=" + std::to_string(m_nextServiceSessionId) +
             " logServiceSessionId=" + std::to_string(m_logServiceSessionId) +
@@ -432,12 +431,11 @@ inline void PendingServiceMessageTracker::verify()
 
 inline void PendingServiceMessageTracker::reset()
 {
-    m_pendingMessages.forEach(
-        [](AtomicBuffer& buffer, std::int32_t offset, std::int32_t length, std::int32_t headOffset)
-        {
-            return messageReset(buffer, offset, length, headOffset);
-        },
-        std::numeric_limits<std::int32_t>::max());
+    SimpleExpandableRingBuffer::MessageConsumer resetConsumer = [](AtomicBuffer& buffer, std::int32_t offset, std::int32_t length, std::int32_t headOffset)
+    {
+        return messageReset(buffer, offset, length, headOffset);
+    };
+    m_pendingMessages.forEach(resetConsumer, std::numeric_limits<std::int32_t>::max());
 }
 
 inline std::int32_t PendingServiceMessageTracker::serviceIdFromLogMessage(std::int64_t clusterSessionId)
@@ -461,7 +459,7 @@ inline bool PendingServiceMessageTracker::messageAppender(
     const std::int32_t headerOffset = offset + MessageHeader::encodedLength();
     const std::int32_t clusterSessionIdOffset = headerOffset + SessionMessageHeader::clusterSessionIdEncodingOffset();
     const std::int32_t timestampOffset = headerOffset + SessionMessageHeader::timestampEncodingOffset();
-    const std::int64_t clusterSessionId = buffer.getInt64(clusterSessionIdOffset, SessionMessageHeader::sbeByteOrder());
+    const std::int64_t clusterSessionId = buffer.getInt64(clusterSessionIdOffset);
 
     const std::int64_t appendPosition = m_logPublisher.appendMessage(
         m_leadershipTermId,
@@ -475,7 +473,7 @@ inline bool PendingServiceMessageTracker::messageAppender(
     {
         ++m_uncommittedMessages;
         m_pendingMessageHeadOffset = headOffset;
-        buffer.putInt64(timestampOffset, appendPosition, SessionMessageHeader::sbeByteOrder());
+        buffer.putInt64(timestampOffset, appendPosition);
         return true;
     }
 
@@ -487,11 +485,11 @@ inline bool PendingServiceMessageTracker::messageReset(
 {
     const std::int32_t timestampOffset = offset +
         MessageHeader::encodedLength() + SessionMessageHeader::timestampEncodingOffset();
-    const std::int64_t appendPosition = buffer.getInt64(timestampOffset, SessionMessageHeader::sbeByteOrder());
+    const std::int64_t appendPosition = buffer.getInt64(timestampOffset);
 
     if (appendPosition < std::numeric_limits<std::int64_t>::max())
     {
-        buffer.putInt64(timestampOffset, std::numeric_limits<std::int64_t>::max(), SessionMessageHeader::sbeByteOrder());
+        buffer.putInt64(timestampOffset, std::numeric_limits<std::int64_t>::max());
         return true;
     }
 
@@ -504,11 +502,11 @@ inline bool PendingServiceMessageTracker::leaderMessageSweeper(
     const std::int32_t headerOffset = offset + MessageHeader::encodedLength();
     const std::int32_t clusterSessionIdOffset = headerOffset + SessionMessageHeader::clusterSessionIdEncodingOffset();
     const std::int32_t timestampOffset = headerOffset + SessionMessageHeader::timestampEncodingOffset();
-    const std::int64_t appendPosition = buffer.getInt64(timestampOffset, SessionMessageHeader::sbeByteOrder());
+    const std::int64_t appendPosition = buffer.getInt64(timestampOffset);
 
     if (m_commitPosition && m_commitPosition->get() >= appendPosition)
     {
-        m_logServiceSessionId = buffer.getInt64(clusterSessionIdOffset, SessionMessageHeader::sbeByteOrder());
+        m_logServiceSessionId = buffer.getInt64(clusterSessionIdOffset);
         --m_uncommittedMessages;
         return true;
     }
@@ -522,7 +520,7 @@ inline bool PendingServiceMessageTracker::followerMessageSweeper(
     const std::int32_t clusterSessionIdOffset = offset +
         MessageHeader::encodedLength() + SessionMessageHeader::clusterSessionIdEncodingOffset();
 
-    return buffer.getInt64(clusterSessionIdOffset, SessionMessageHeader::sbeByteOrder()) <= m_logServiceSessionId;
+    return buffer.getInt64(clusterSessionIdOffset) <= m_logServiceSessionId;
 }
 
 }}

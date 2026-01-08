@@ -3672,3 +3672,85 @@ inline void ConsensusModuleAgent::updateMemberDetails(const ClusterMember& newLe
 }}
 
 
+
+// Implementations of Election methods that access ConsensusModuleAgent members
+// These are placed here to resolve circular dependency issues
+inline void Election::onRecordingSignal(
+    std::int64_t correlationId,
+    std::int64_t recordingId,
+    std::int64_t position,
+    RecordingSignal signal)
+{
+    if (ElectionState::INIT == m_state)
+    {
+        return;
+    }
+
+    if (m_logReplication)
+    {
+        m_logReplication->onSignal(correlationId, recordingId, position, signal);
+        m_consensusModuleAgent.logRecordingId(m_logReplication->recordingId());
+    }
+}
+
+inline void Election::state(ElectionState newState, std::int64_t nowNs, const std::string& reason)
+{
+    if (newState != m_state)
+    {
+        if (ElectionState::CANVASS == m_state)
+        {
+            m_isExtendedCanvass = false;
+        }
+
+        switch (newState)
+        {
+            case ElectionState::CANVASS:
+                resetMembers();
+                m_consensusModuleAgent.role(service::Role::FOLLOWER);
+                break;
+
+            case ElectionState::CANDIDATE_BALLOT:
+                m_consensusModuleAgent.role(service::Role::CANDIDATE);
+                break;
+
+            case ElectionState::LEADER_LOG_REPLICATION:
+                m_consensusModuleAgent.role(service::Role::LEADER);
+                m_logSessionId = m_consensusModuleAgent.addLogPublication(m_appendPosition);
+                break;
+
+            case ElectionState::FOLLOWER_LOG_REPLICATION:
+            case ElectionState::FOLLOWER_REPLAY:
+                m_consensusModuleAgent.role(service::Role::FOLLOWER);
+                break;
+
+            default:
+                break;
+        }
+
+        logStateChange(
+            m_thisMember.id(),
+            m_state,
+            newState,
+            m_leaderMember ? m_leaderMember->id() : aeron::NULL_VALUE,
+            m_candidateTermId,
+            m_leadershipTermId,
+            m_logPosition,
+            m_logLeadershipTermId,
+            m_appendPosition,
+            m_catchupJoinPosition,
+            reason);
+
+        m_state = newState;
+        m_ctx.electionStateCounter()->setRelease(static_cast<std::int64_t>(newState));
+        m_timeOfLastStateChangeNs = nowNs;
+        m_timeOfLastUpdateNs = m_initialTimeOfLastUpdateNs;
+        m_timeOfLastCommitPositionUpdateNs = m_initialTimeOfLastUpdateNs;
+    }
+}
+
+inline void Election::stopCatchup()
+{
+    m_consensusModuleAgent.stopAllCatchups();
+    m_catchupJoinPosition = NULL_POSITION;
+}
+// Implementations of Election methods that access ConsensusModuleAgent members

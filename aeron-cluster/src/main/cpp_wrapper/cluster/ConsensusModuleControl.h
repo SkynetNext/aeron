@@ -2,8 +2,8 @@
 #include <memory>
 #include <chrono>
 #include "Aeron.h"
-#include "archive/client/AeronArchive.h"
-#include "security/AuthorisationService.h"
+#include "client/archive/AeronArchive.h"
+// #include "security/AuthorisationService.h" // Not available in C++ wrapper
 #include "concurrent/IdleStrategy.h"
 #include "ClusterClientSession.h"
 #include "ClusterMember.h"
@@ -11,10 +11,12 @@
 namespace aeron { namespace cluster
 {
 using namespace aeron::archive::client;
-using namespace aeron::security;
+// using namespace aeron::security; // Not available in C++ wrapper
 using namespace aeron::concurrent;
 
+namespace security { class AuthorisationService; } // Forward declaration
 class ConsensusModule; // Forward declaration
+class ConsensusModuleContext; // Forward declaration for ConsensusModule::Context
 
 /**
  * Control interface for performing operations on the consensus module from a ConsensusModuleExtension.
@@ -61,7 +63,7 @@ public:
      *
      * @return the ConsensusModule::Context under which the extension is running.
      */
-    virtual ConsensusModule::Context& context() = 0;
+    virtual ConsensusModuleContext& context() = 0;
 
     /**
      * The Aeron client to be used by the extension.
@@ -82,7 +84,7 @@ public:
      *
      * @return the AuthorisationService used by the consensus module.
      */
-    virtual std::shared_ptr<AuthorisationService> authorisationService() = 0;
+    virtual std::shared_ptr<security::AuthorisationService> authorisationService() = 0;
 
     /**
      * Lookup a ClusterClientSession for a given id.

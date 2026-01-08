@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include "ClusterMember.h"
-#include "../client/ClusterEvent.h"
+#include "client/ClusterEvent.h"
 #include "util/Exceptions.h"
 
 namespace aeron { namespace cluster

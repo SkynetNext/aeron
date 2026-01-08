@@ -1,6 +1,6 @@
 #pragma once
 #include <chrono>
-#include "../service/ClusterClock.h"
+#include "service/ClusterClock.h"
 #include "concurrent/HighResolutionClock.h"
 
 namespace aeron { namespace cluster

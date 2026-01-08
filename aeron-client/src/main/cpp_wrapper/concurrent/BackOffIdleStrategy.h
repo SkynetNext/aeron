@@ -23,6 +23,7 @@
 
 #include "concurrent/Atomic64.h"
 #include "util/BitUtil.h"
+#include "concurrent/IdleStrategy.h"
 
 namespace aeron { namespace concurrent {
 
@@ -31,7 +32,7 @@ static constexpr std::uint8_t BACKOFF_STATE_SPINNING = 1;
 static constexpr std::uint8_t BACKOFF_STATE_YIELDING = 2;
 static constexpr std::uint8_t BACKOFF_STATE_PARKING = 3;
 
-class BackoffIdleStrategy
+class BackoffIdleStrategy : public IdleStrategy
 {
 public:
     explicit BackoffIdleStrategy(
@@ -52,7 +53,7 @@ public:
     {
     }
 
-    inline void idle(int workCount)
+    void idle(int workCount) override
     {
         if (workCount > 0)
         {
@@ -64,7 +65,7 @@ public:
         }
     }
 
-    inline void reset()
+    void reset() override
     {
         m_spins = 0;
         m_yields = 0;
@@ -72,7 +73,7 @@ public:
         m_state = BACKOFF_STATE_NOT_IDLE;
     }
 
-    inline void idle()
+    void idle() override
     {
         switch(m_state)
         {

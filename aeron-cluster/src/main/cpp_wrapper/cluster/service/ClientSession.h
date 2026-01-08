@@ -20,7 +20,7 @@
 #include "Publication.h"
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/AtomicBuffer.h"
-#include "../client/AeronCluster.h"
+#include "client/AeronCluster.h"
 
 namespace aeron { namespace cluster { namespace service
 {

@@ -6,11 +6,11 @@
 #include <string>
 #include <algorithm>
 #include <cstdint>
-#include "archive/client/AeronArchive.h"
+#include "client/archive/AeronArchive.h"
 #include "archive/codecs/RecordingSignal.h"
-#include "archive/client/ArchiveExceptions.h"
+#include "client/archive/ArchiveExceptions.h"
 #include "Counter.h"
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 #include "util/Exceptions.h"
 #include "util/CloseHelper.h"
 #include "ChannelUri.h"

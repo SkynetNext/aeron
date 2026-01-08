@@ -3,15 +3,15 @@
 #include <vector>
 #include <string>
 #include "Subscription.h"
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 #include "ClusterMember.h"
 #include "FragmentAssembler.h"
 #include "concurrent/logbuffer/Header.h"
 #include "concurrent/AtomicBuffer.h"
 #include "util/CloseHelper.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/ClusterMembersResponse.h"
-#include "generated/aeron_cluster_client/ClusterMembersExtendedResponse.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/ClusterMembersResponse.h"
+#include "generated/aeron_cluster_codecs/ClusterMembersExtendedResponse.h"
 
 namespace aeron { namespace cluster
 {

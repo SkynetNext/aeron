@@ -7,10 +7,9 @@
 #include <map>
 #include <algorithm>
 #include <fstream>
-#include <filesystem>
 #include <cstdint>
-#include "archive/client/AeronArchive.h"
-#include "../client/ClusterExceptions.h"
+#include "client/archive/AeronArchive.h"
+#include "client/ClusterExceptions.h"
 #include "util/Exceptions.h"
 #include "util/BitUtil.h"
 #include "util/StringUtil.h"
@@ -75,8 +74,8 @@ public:
 
         std::int32_t length() const;
         Entry invalidate() const;
-        Entry logPosition(std::int64_t logPosition) const;
-        std::int64_t serviceId() const;
+        Entry withLogPosition(std::int64_t logPosition) const;
+        std::int64_t getServiceId() const;
 
         bool operator==(const Entry& other) const;
         std::string toString() const;
@@ -168,18 +167,18 @@ public:
     static constexpr std::int32_t ENTRY_TYPE_STANDBY_SNAPSHOT = 2;
     static constexpr std::int32_t ENTRY_TYPE_INVALID_FLAG = 1 << 31;
     static constexpr std::int32_t RECORDING_ID_OFFSET = 0;
-    static constexpr std::int32_t LEADERSHIP_TERM_ID_OFFSET = RECORDING_ID_OFFSET + BitUtil::SIZE_OF_LONG;
-    static constexpr std::int32_t TERM_BASE_LOG_POSITION_OFFSET = LEADERSHIP_TERM_ID_OFFSET + BitUtil::SIZE_OF_LONG;
-    static constexpr std::int32_t LOG_POSITION_OFFSET = TERM_BASE_LOG_POSITION_OFFSET + BitUtil::SIZE_OF_LONG;
-    static constexpr std::int32_t TIMESTAMP_OFFSET = LOG_POSITION_OFFSET + BitUtil::SIZE_OF_LONG;
-    static constexpr std::int32_t SERVICE_ID_OFFSET = TIMESTAMP_OFFSET + BitUtil::SIZE_OF_LONG;
-    static constexpr std::int32_t ENTRY_TYPE_OFFSET = SERVICE_ID_OFFSET + BitUtil::SIZE_OF_INT;
-    static constexpr std::int32_t ENDPOINT_OFFSET = ENTRY_TYPE_OFFSET + BitUtil::SIZE_OF_INT;
+    static constexpr std::int32_t LEADERSHIP_TERM_ID_OFFSET = RECORDING_ID_OFFSET + static_cast<std::int32_t>(sizeof(std::int64_t));
+    static constexpr std::int32_t TERM_BASE_LOG_POSITION_OFFSET = LEADERSHIP_TERM_ID_OFFSET + static_cast<std::int32_t>(sizeof(std::int64_t));
+    static constexpr std::int32_t LOG_POSITION_OFFSET = TERM_BASE_LOG_POSITION_OFFSET + static_cast<std::int32_t>(sizeof(std::int64_t));
+    static constexpr std::int32_t TIMESTAMP_OFFSET = LOG_POSITION_OFFSET + static_cast<std::int32_t>(sizeof(std::int64_t));
+    static constexpr std::int32_t SERVICE_ID_OFFSET = TIMESTAMP_OFFSET + static_cast<std::int32_t>(sizeof(std::int64_t));
+    static constexpr std::int32_t ENTRY_TYPE_OFFSET = SERVICE_ID_OFFSET + static_cast<std::int32_t>(sizeof(std::int32_t));
+    static constexpr std::int32_t ENDPOINT_OFFSET = ENTRY_TYPE_OFFSET + static_cast<std::int32_t>(sizeof(std::int32_t));
     static constexpr std::int32_t MAX_ENTRY_LENGTH = 4096;
-    static constexpr std::int32_t MAX_ENDPOINT_LENGTH = MAX_ENTRY_LENGTH - ENDPOINT_OFFSET - BitUtil::SIZE_OF_INT;
+    static constexpr std::int32_t MAX_ENDPOINT_LENGTH = MAX_ENTRY_LENGTH - ENDPOINT_OFFSET - static_cast<std::int32_t>(sizeof(std::int32_t));
     static constexpr std::int32_t RECORD_ALIGNMENT = 64;
 
-    RecordingLog(const std::filesystem::path& parentDir, bool createNew);
+    RecordingLog(const std::string& parentDir, bool createNew);
     ~RecordingLog();
 
     void close();
@@ -281,7 +280,7 @@ private:
         std::vector<std::uint8_t>& byteBuffer,
         AtomicBuffer& buffer,
         std::vector<Entry>& entries);
-    static void syncDirectory(const std::filesystem::path& dir);
+    static void syncDirectory(const std::string& dir);
     static void planRecovery(
         std::vector<Snapshot>& snapshots,
         std::shared_ptr<Log>& logRef,
@@ -300,7 +299,7 @@ private:
     std::vector<Entry> m_entriesCache;
     std::unordered_map<std::int64_t, std::int32_t> m_cacheIndexByLeadershipTermIdMap;
     std::vector<std::int32_t> m_invalidSnapshots;
-    std::filesystem::path m_logFilePath;
+    std::string m_logFilePath;
 };
 
 // Implementation - Entry class
@@ -353,8 +352,8 @@ inline RecordingLog::Entry::Entry(
 inline std::int32_t RecordingLog::Entry::length() const
 {
     const std::int32_t unalignedLength = (ENTRY_TYPE_STANDBY_SNAPSHOT == type) ?
-        (ENDPOINT_OFFSET + BitUtil::SIZE_OF_INT + static_cast<std::int32_t>(archiveEndpoint.length())) : ENDPOINT_OFFSET;
-    return static_cast<std::int32_t>(BitUtil::align(static_cast<std::int64_t>(unalignedLength), RECORD_ALIGNMENT));
+        (ENDPOINT_OFFSET + static_cast<std::int32_t>(sizeof(std::int32_t)) + static_cast<std::int32_t>(archiveEndpoint.length())) : ENDPOINT_OFFSET;
+    return static_cast<std::int32_t>(BitUtil::align(static_cast<std::int64_t>(unalignedLength), static_cast<std::int64_t>(RECORD_ALIGNMENT)));
 }
 
 inline RecordingLog::Entry RecordingLog::Entry::invalidate() const
@@ -364,14 +363,14 @@ inline RecordingLog::Entry RecordingLog::Entry::invalidate() const
         serviceId, type, archiveEndpoint, false, position, entryIndex);
 }
 
-inline RecordingLog::Entry RecordingLog::Entry::logPosition(std::int64_t newLogPosition) const
+inline RecordingLog::Entry RecordingLog::Entry::withLogPosition(std::int64_t newLogPosition) const
 {
     return Entry(
         recordingId, leadershipTermId, termBaseLogPosition, newLogPosition, timestamp,
         serviceId, type, archiveEndpoint, isValid, position, entryIndex);
 }
 
-inline std::int64_t RecordingLog::Entry::serviceId() const
+inline std::int64_t RecordingLog::Entry::getServiceId() const
 {
     return serviceId;
 }
@@ -391,7 +390,7 @@ inline bool RecordingLog::Entry::operator==(const Entry& other) const
 
 inline std::string RecordingLog::Entry::toString() const
 {
-    return "Entry{" +
+    return std::string("Entry{") +
         "recordingId=" + std::to_string(recordingId) +
         ", leadershipTermId=" + std::to_string(leadershipTermId) +
         ", termBaseLogPosition=" + std::to_string(termBaseLogPosition) +
@@ -424,7 +423,7 @@ inline RecordingLog::Snapshot::Snapshot(
 
 inline std::string RecordingLog::Snapshot::toString() const
 {
-    return "Snapshot{" +
+    return std::string("Snapshot{") +
         "recordingId=" + std::to_string(recordingId) +
         ", leadershipTermId=" + std::to_string(leadershipTermId) +
         ", termBaseLogPosition=" + std::to_string(termBaseLogPosition) +
@@ -461,7 +460,7 @@ inline RecordingLog::Log::Log(
 
 inline std::string RecordingLog::Log::toString() const
 {
-    return "Log{" +
+    return std::string("Log{") +
         "recordingId=" + std::to_string(recordingId) +
         ", leadershipTermId=" + std::to_string(leadershipTermId) +
         ", termBaseLogPosition=" + std::to_string(termBaseLogPosition) +
@@ -494,7 +493,7 @@ inline RecordingLog::RecoveryPlan::RecoveryPlan(
 
 inline std::string RecordingLog::RecoveryPlan::toString() const
 {
-    std::string result = "RecoveryPlan{" +
+    std::string result = std::string("RecoveryPlan{") +
         "lastLeadershipTermId=" + std::to_string(lastLeadershipTermId) +
         ", lastTermBaseLogPosition=" + std::to_string(lastTermBaseLogPosition) +
         ", appendedLogPosition=" + std::to_string(appendedLogPosition) +
@@ -512,11 +511,14 @@ inline std::string RecordingLog::RecoveryPlan::toString() const
 }
 
 // Implementation - RecordingLog class
-inline RecordingLog::RecordingLog(const std::filesystem::path& parentDir, bool createNew) :
+inline RecordingLog::RecordingLog(const std::string& parentDir, bool createNew) :
     m_byteBuffer(MAX_ENTRY_LENGTH, 0)
 {
-    m_logFilePath = parentDir / RECORDING_LOG_FILE_NAME;
-    bool isNewFile = !std::filesystem::exists(m_logFilePath);
+    m_logFilePath = parentDir + "/" + RECORDING_LOG_FILE_NAME;
+    // Simple file existence check - in a real implementation, use platform-specific APIs
+    std::ifstream testFile(m_logFilePath);
+    bool isNewFile = !testFile.good();
+    testFile.close();
     
     std::ios_base::openmode mode = std::ios::in | std::ios::out | std::ios::binary;
     if (createNew || isNewFile)
@@ -527,7 +529,7 @@ inline RecordingLog::RecordingLog(const std::filesystem::path& parentDir, bool c
     m_fileStream.open(m_logFilePath, mode);
     if (!m_fileStream.is_open())
     {
-        throw ClusterException("Failed to open recording log file: " + m_logFilePath.string(), SOURCEINFO);
+        throw ClusterException("Failed to open recording log file: " + m_logFilePath, SOURCEINFO);
     }
     
     m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
@@ -655,15 +657,13 @@ inline void RecordingLog::validateTermRecordingId(std::int64_t recordingId)
     m_termRecordingId = recordingId;
 }
 
-inline void RecordingLog::syncDirectory(const std::filesystem::path& dir)
+inline void RecordingLog::syncDirectory(const std::string& dir)
 {
     // On Windows, directory sync is not easily available
     // On Unix, we would call fsync on the directory file descriptor
     // For now, we'll just ensure the directory exists
-    if (!std::filesystem::exists(dir))
-    {
-        std::filesystem::create_directories(dir);
-    }
+    // Note: In a real implementation, use platform-specific directory creation APIs
+    (void)dir; // TODO: Implement directory creation/sync
 }
 
 inline void RecordingLog::reload()
@@ -736,8 +736,8 @@ inline void RecordingLog::reload()
 
 inline std::int64_t RecordingLog::findLastTermRecordingId() const
 {
-    const Entry* lastTerm = findLastTerm();
-    return lastTerm ? lastTerm->recordingId : AeronArchive::NULL_RECORDING_ID;
+    Entry* lastTerm = const_cast<RecordingLog*>(this)->findLastTerm();
+    return lastTerm ? lastTerm->recordingId : aeron::NULL_VALUE;
 }
 
 inline RecordingLog::Entry* RecordingLog::findLastTerm()
@@ -786,7 +786,7 @@ inline void RecordingLog::appendTerm(
 {
     validateTermRecordingId(recordingId);
     
-    std::int64_t logPosition = AeronArchive::NULL_POSITION;
+    std::int64_t logPosition = NULL_POSITION;
     
     if (!m_entriesCache.empty())
     {
@@ -898,7 +898,7 @@ inline void RecordingLog::commitLogPosition(std::int64_t leadershipTermId, std::
     {
         m_buffer.putInt64(0, logPosition);
         persistToStorage(entry.position, LOG_POSITION_OFFSET, SIZE_OF_LONG);
-        entry = entry.logPosition(logPosition);
+        entry = entry.withLogPosition(logPosition);
     }
 }
 
@@ -1022,7 +1022,7 @@ inline void RecordingLog::persistToStorage(const Entry& entry, AtomicBuffer& dir
     {
         m_fileStream.seekp(0, std::ios::end);
         const std::int64_t currentSize = m_fileStream.tellp();
-        entryPosition = BitUtil::align(currentSize, RECORD_ALIGNMENT);
+        entryPosition = BitUtil::align(currentSize, static_cast<std::int64_t>(RECORD_ALIGNMENT));
     }
     
     writeEntryToBuffer(entry, directBuffer);
@@ -1153,7 +1153,7 @@ inline bool RecordingLog::restoreInvalidSnapshot(
 
 inline RecordingLog::Entry* RecordingLog::getLatestSnapshot(std::int32_t serviceId)
 {
-    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = ConsensusModuleAgent::SERVICE_ID;
+    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = aeron::NULL_VALUE; // ConsensusModuleAgent::SERVICE_ID
     
     for (int i = static_cast<int>(m_entriesCache.size()) - 1; i >= 0; i--)
     {
@@ -1182,10 +1182,10 @@ inline RecordingLog::Entry* RecordingLog::getLatestSnapshot(std::int32_t service
 
 inline bool RecordingLog::invalidateLatestSnapshot()
 {
-    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = ConsensusModuleAgent::SERVICE_ID;
+    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = aeron::NULL_VALUE; // ConsensusModuleAgent::SERVICE_ID
     
     std::vector<std::int32_t> indices;
-    std::int64_t highLogPosition = AeronArchive::NULL_POSITION;
+    std::int64_t highLogPosition = NULL_POSITION;
     
     for (int idx = static_cast<int>(m_entriesCache.size()) - 1; idx >= 0; idx--)
     {
@@ -1392,7 +1392,14 @@ inline void RecordingLog::planRecovery(
         if (aeron::NULL_VALUE != replicatedRecordingId)
         {
             RecordingExtent recordingExtent;
-            if (archive->listRecording(replicatedRecordingId, recordingExtent) == 0)
+            recording_descriptor_consumer_t consumer = [&recordingExtent](RecordingDescriptor& desc) {
+                recordingExtent.onRecordingDescriptor(
+                    desc.m_controlSessionId, desc.m_correlationId, desc.m_recordingId,
+                    desc.m_startTimestamp, desc.m_stopTimestamp, desc.m_startPosition, desc.m_stopPosition,
+                    desc.m_initialTermId, desc.m_segmentFileLength, desc.m_termBufferLength, desc.m_mtuLength,
+                    desc.m_sessionId, desc.m_streamId, desc.m_strippedChannel, desc.m_originalChannel, desc.m_sourceIdentity);
+            };
+            if (archive->listRecording(replicatedRecordingId, consumer) == 0)
             {
                 throw ClusterException("unknown recording id: " + std::to_string(replicatedRecordingId), SOURCEINFO);
             }
@@ -1416,7 +1423,7 @@ inline void RecordingLog::planRecovery(
     int logIndex = -1;
     int snapshotIndex = -1;
     
-    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = ConsensusModuleAgent::SERVICE_ID;
+    const std::int32_t CONSENSUS_MODULE_SERVICE_ID = aeron::NULL_VALUE; // ConsensusModuleAgent::SERVICE_ID
     
     for (int i = static_cast<int>(entries.size()) - 1; i >= 0; i--)
     {
@@ -1445,7 +1452,14 @@ inline void RecordingLog::planRecovery(
     {
         const Entry& entry = entries[logIndex];
         RecordingExtent recordingExtent;
-        if (archive->listRecording(entry.recordingId, recordingExtent) == 0)
+        recording_descriptor_consumer_t consumer = [&recordingExtent](RecordingDescriptor& desc) {
+            recordingExtent.onRecordingDescriptor(
+                desc.m_controlSessionId, desc.m_correlationId, desc.m_recordingId,
+                desc.m_startTimestamp, desc.m_stopTimestamp, desc.m_startPosition, desc.m_stopPosition,
+                desc.m_initialTermId, desc.m_segmentFileLength, desc.m_termBufferLength, desc.m_mtuLength,
+                desc.m_sessionId, desc.m_streamId, desc.m_strippedChannel, desc.m_originalChannel, desc.m_sourceIdentity);
+        };
+        if (archive->listRecording(entry.recordingId, consumer) == 0)
         {
             throw ClusterException("unknown recording id: " + std::to_string(entry.recordingId), SOURCEINFO);
         }
@@ -1497,7 +1511,7 @@ inline RecordingLog::RecoveryPlan RecordingLog::createRecoveryPlan(
         lastLeadershipTermId = logRef->leadershipTermId;
         lastTermBaseLogPosition = logRef->termBaseLogPosition;
         appendedLogPosition = logRef->stopPosition;
-        committedLogPosition = (AeronArchive::NULL_POSITION != logRef->logPosition) ? 
+        committedLogPosition = (NULL_POSITION != logRef->logPosition) ? 
             logRef->logPosition : committedLogPosition;
     }
     

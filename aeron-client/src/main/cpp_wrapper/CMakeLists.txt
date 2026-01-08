@@ -40,12 +40,15 @@ SET(HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/Subscription.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/AgentInvoker.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/AgentRunner.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/AgentTerminationException.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/CountedErrorHandler.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/Atomic64.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/AtomicBuffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/AtomicCounter.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/EpochClock.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/UnsafeBuffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/BackOffIdleStrategy.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/IdleStrategy.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/BusySpinIdleStrategy.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/CountersReader.h
     ${CMAKE_CURRENT_SOURCE_DIR}/concurrent/NoOpIdleStrategy.h

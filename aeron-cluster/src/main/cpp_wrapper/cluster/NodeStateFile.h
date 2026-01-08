@@ -3,24 +3,32 @@
 #include <string>
 #include <memory>
 #include <cstdint>
-#include <filesystem>
+// #include <filesystem>  // Not available in C++14, using std::string instead
 #include "Aeron.h"
-#include "../client/ClusterExceptions.h"
-#include "../service/ClusterMarkFile.h"
+#include "client/ClusterExceptions.h"
+#include "service/ClusterMarkFile.h"
 #include "concurrent/AtomicBuffer.h"
 #include "util/MemoryMappedFile.h"
 #include "util/BitUtil.h"
 #include "util/SemanticVersion.h"
-#include "generated/aeron_cluster_node/MessageHeader.h"
-#include "generated/aeron_cluster_node/NodeStateHeader.h"
-#include "generated/aeron_cluster_node/CandidateTerm.h"
-#include "generated/aeron_cluster_node/NodeStateFooter.h"
+#include "Context.h"  // For NULL_VALUE
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/NodeStateHeader.h"
+#include "generated/aeron_cluster_codecs/CandidateTerm.h"
+#include "generated/aeron_cluster_codecs/NodeStateFooter.h"
 
 namespace aeron { namespace cluster {
 
 using namespace aeron::concurrent;
-using namespace aeron::cluster::codecs::node;
+using namespace aeron::cluster::codecs;
 using namespace aeron::util;
+
+// Type aliases for decoder types (SBE generates without Decoder suffix)
+using NodeStateHeaderDecoder = codecs::NodeStateHeader;
+using CandidateTermDecoder = codecs::CandidateTerm;
+using NodeStateFooterDecoder = codecs::NodeStateFooter;
+using MessageHeaderDecoder = codecs::MessageHeader;
+using MessageHeader = codecs::MessageHeader;
 
 /**
  * An extensible list of information relating to a specific cluster node. Used to track persistent state that is node
@@ -81,7 +89,7 @@ public:
      * not already exist.
      */
     NodeStateFile(
-        const std::filesystem::path& clusterDir,
+        const std::string& clusterDir,
         bool createNew,
         std::int32_t fileSyncLevel);
 
@@ -200,18 +208,22 @@ inline std::int64_t NodeStateFile::CandidateTerm::logPosition() const
 }
 
 inline NodeStateFile::NodeStateFile(
-    const std::filesystem::path& clusterDir,
+    const std::string& clusterDir,
     bool createNew,
     std::int32_t fileSyncLevel) :
     m_fileSyncLevel(fileSyncLevel)
 {
-    std::filesystem::path nodeStateFilePath = clusterDir / FILENAME;
+    std::string nodeStateFilePath = clusterDir + "/" + FILENAME;
     std::shared_ptr<MemoryMappedFile> mappedFile = nullptr;
     AtomicBuffer buffer(nullptr, 0);
 
     try
     {
-        if (!std::filesystem::exists(nodeStateFilePath))
+        // Check if file exists using C++14 compatible method
+        std::ifstream testFile(nodeStateFilePath);
+        bool fileExists = testFile.good();
+        testFile.close();
+        if (!fileExists)
         {
             if (!createNew)
             {
@@ -219,7 +231,7 @@ inline NodeStateFile::NodeStateFile(
             }
 
             mappedFile = MemoryMappedFile::createNew(
-                nodeStateFilePath.string().c_str(), 0, MINIMUM_FILE_LENGTH, false);
+                nodeStateFilePath.c_str(), 0, MINIMUM_FILE_LENGTH, false);
             buffer = AtomicBuffer(mappedFile->getMemoryPtr(), mappedFile->getMemorySize());
 
             // Verify alignment (Java: buffer.verifyAlignment())
@@ -235,11 +247,11 @@ inline NodeStateFile::NodeStateFile(
                 m_candidateTermDecoder);
 
             m_candidateTermIdOffset = calculateAndVerifyCandidateTermIdOffset();
-            buffer.putInt64Ordered(m_candidateTermIdOffset, Aeron::NULL_VALUE);
+            buffer.putInt64Ordered(m_candidateTermIdOffset, NULL_VALUE);
         }
         else
         {
-            mappedFile = MemoryMappedFile::mapExisting(nodeStateFilePath.string().c_str(), 0, 0, false, false);
+            mappedFile = MemoryMappedFile::mapExisting(nodeStateFilePath.c_str(), 0, 0, false, false);
             buffer = AtomicBuffer(mappedFile->getMemoryPtr(), mappedFile->getMemorySize());
 
             loadDecodersAndOffsets(buffer);
@@ -282,8 +294,9 @@ inline void NodeStateFile::loadInitialState(
     CandidateTermDecoder& candidateTermDecoder,
     MessageHeaderDecoder& messageHeaderDecoder)
 {
-    nodeStateHeaderDecoder.wrap(
-        buffer.buffer(), 0, NodeStateHeaderDecoder::blockLength(), NodeStateHeaderDecoder::schemaVersion());
+    nodeStateHeaderDecoder.wrapForDecode(
+        reinterpret_cast<char *>(buffer.buffer()), 0, static_cast<std::uint64_t>(buffer.capacity()),
+        NodeStateHeaderDecoder::sbeBlockLength(), NodeStateHeaderDecoder::sbeSchemaVersion());
 
     const std::int32_t version = nodeStateHeaderDecoder.version();
     if (ClusterMarkFile::MAJOR_VERSION != SemanticVersion::major(version))
@@ -295,29 +308,31 @@ inline void NodeStateFile::loadInitialState(
     }
 
     const std::int64_t footerOffset = scanForMessageTypeOffset(
-        nodeStateHeaderDecoder.sbeBlockLength(),
-        NodeStateFooterDecoder::sbeTemplateId(),
+        static_cast<std::int32_t>(nodeStateHeaderDecoder.sbeBlockLength()),
+        static_cast<std::int32_t>(NodeStateFooterDecoder::SBE_TEMPLATE_ID),
         buffer,
         messageHeaderDecoder);
 
-    if (Aeron::NULL_VALUE == footerOffset)
+    if (NULL_VALUE == footerOffset)
     {
         throw IllegalStateException("failed to find NodeStateFooter entry, file corrupt?", SOURCEINFO);
     }
 
     const std::int64_t candidateTermOffset = scanForMessageTypeOffset(
-        nodeStateHeaderDecoder.sbeBlockLength(),
-        CandidateTermDecoder::sbeTemplateId(),
+        static_cast<std::int32_t>(nodeStateHeaderDecoder.sbeBlockLength()),
+        static_cast<std::int32_t>(CandidateTermDecoder::SBE_TEMPLATE_ID),
         buffer,
         messageHeaderDecoder);
 
-    if (Aeron::NULL_VALUE == candidateTermOffset)
+    if (NULL_VALUE == candidateTermOffset)
     {
         throw IllegalStateException("failed to find CandidateTerm entry", SOURCEINFO);
     }
 
-    candidateTermDecoder.wrapAndApplyHeader(
-        buffer.buffer(), static_cast<std::int32_t>(candidateTermOffset), messageHeaderDecoder);
+    candidateTermDecoder.wrapForDecode(
+        reinterpret_cast<char *>(buffer.buffer()), static_cast<std::uint64_t>(candidateTermOffset),
+        static_cast<std::uint64_t>(buffer.capacity()),
+        CandidateTermDecoder::sbeBlockLength(), CandidateTermDecoder::sbeSchemaVersion());
 }
 
 inline void NodeStateFile::initialiseDecodersOnCreation(
@@ -326,34 +341,46 @@ inline void NodeStateFile::initialiseDecodersOnCreation(
     MessageHeaderDecoder& messageHeaderDecoder,
     CandidateTermDecoder& candidateTermDecoder)
 {
-    MessageHeaderEncoder messageHeaderEncoder;
+    char* buf = reinterpret_cast<char *>(buffer.buffer());
+    std::uint64_t bufLen = static_cast<std::uint64_t>(buffer.capacity());
+    
+    // Initialize NodeStateHeader using wrapAndApplyHeader for encoding
+    nodeStateHeaderDecoder.wrapAndApplyHeader(buf, 0, bufLen);
+    nodeStateHeaderDecoder.version(ClusterMarkFile::SEMANTIC_VERSION);
 
-    nodeStateHeaderDecoder.wrap(
-        buffer.buffer(), 0, NodeStateHeaderDecoder::blockLength(), NodeStateHeaderDecoder::schemaVersion());
-    NodeStateHeaderEncoder nodeStateHeaderEncoder;
-    nodeStateHeaderEncoder.wrap(buffer.buffer(), 0);
-    nodeStateHeaderEncoder.version(ClusterMarkFile::SEMANTIC_VERSION);
-
-    const std::int32_t candidateTermFrameOffset = NodeStateHeaderDecoder::blockLength();
+    const std::int32_t candidateTermFrameOffset = static_cast<std::int32_t>(NodeStateHeaderDecoder::SBE_BLOCK_LENGTH);
     verifyAlignment(candidateTermFrameOffset);
 
-    // Set candidateTermId
-    CandidateTermEncoder candidateTermEncoder;
+    // Set candidateTermId using wrapAndApplyHeader for encoding
+    CandidateTermDecoder candidateTermEncoder;
     candidateTermEncoder.wrapAndApplyHeader(
-        buffer.buffer(), candidateTermFrameOffset, messageHeaderEncoder);
-    candidateTermDecoder.wrapAndApplyHeader(
-        buffer.buffer(), candidateTermFrameOffset, messageHeaderDecoder);
+        buf, static_cast<std::uint64_t>(candidateTermFrameOffset), bufLen);
     candidateTermEncoder
-        .logPosition(Aeron::NULL_VALUE)
-        .timestamp(Aeron::NULL_VALUE)
-        .candidateTermId(Aeron::NULL_VALUE);
-    messageHeaderEncoder.frameLength(MessageHeader::encodedLength() + candidateTermEncoder.encodedLength());
-
-    const std::int32_t footerOffset = candidateTermFrameOffset +
-        static_cast<std::int32_t>(BitUtil::align(messageHeaderDecoder.frameLength(), ALIGNMENT));
-    NodeStateFooterEncoder nodeStateFooterEncoder;
-    nodeStateFooterEncoder.wrapAndApplyHeader(buffer.buffer(), footerOffset, messageHeaderEncoder);
-    messageHeaderEncoder.frameLength(MessageHeader::encodedLength() + nodeStateFooterEncoder.encodedLength());
+        .logPosition(NULL_VALUE)
+        .timestamp(NULL_VALUE)
+        .candidateTermId(NULL_VALUE);
+    
+    // Update message header frame length for CandidateTerm
+    MessageHeader msgHdr(buf, static_cast<std::uint64_t>(candidateTermFrameOffset), bufLen, MessageHeader::sbeSchemaVersion());
+    msgHdr.frameLength(static_cast<std::int32_t>(MessageHeader::encodedLength() + candidateTermEncoder.encodedLength()));
+    
+    // Also wrap for decode to read back
+    candidateTermDecoder.wrapForDecode(
+        buf, static_cast<std::uint64_t>(candidateTermFrameOffset), bufLen,
+        CandidateTermDecoder::sbeBlockLength(), CandidateTermDecoder::sbeSchemaVersion());
+    messageHeaderDecoder.wrap(
+        buf, static_cast<std::uint64_t>(candidateTermFrameOffset),
+        MessageHeader::sbeSchemaVersion(), bufLen);
+    
+    // Add NodeStateFooter
+    const std::int32_t footerOffset = candidateTermFrameOffset + 
+        static_cast<std::int32_t>(BitUtil::align(static_cast<std::int64_t>(msgHdr.frameLength()), static_cast<std::int64_t>(8)));
+    NodeStateFooterDecoder nodeStateFooterEncoder;
+    nodeStateFooterEncoder.wrapAndApplyHeader(buf, static_cast<std::uint64_t>(footerOffset), bufLen);
+    
+    // Update message header frame length for NodeStateFooter
+    MessageHeader footerMsgHdr(buf, static_cast<std::uint64_t>(footerOffset), bufLen, MessageHeader::sbeSchemaVersion());
+    footerMsgHdr.frameLength(static_cast<std::int32_t>(MessageHeader::encodedLength() + nodeStateFooterEncoder.encodedLength()));
 }
 
 inline void NodeStateFile::loadDecodersAndOffsets(AtomicBuffer& buffer)
@@ -378,7 +405,9 @@ inline std::int64_t NodeStateFile::scanForMessageTypeOffset(
 
     while (position < static_cast<std::int32_t>(buffer.capacity()))
     {
-        messageHeaderDecoder.wrap(buffer.buffer(), position);
+        messageHeaderDecoder.wrap(
+            reinterpret_cast<char *>(buffer.buffer()), static_cast<std::uint64_t>(position),
+            MessageHeader::sbeSchemaVersion(), static_cast<std::uint64_t>(buffer.capacity()));
 
         const std::int32_t messageLength = messageHeaderDecoder.frameLength();
 
@@ -386,9 +415,9 @@ inline std::int64_t NodeStateFile::scanForMessageTypeOffset(
         {
             return position;
         }
-        else if (NodeStateFooterEncoder::sbeTemplateId() == messageHeaderDecoder.templateId())
+        else if (NodeStateFooterDecoder::SBE_TEMPLATE_ID == messageHeaderDecoder.templateId())
         {
-            return Aeron::NULL_VALUE;
+            return NULL_VALUE;
         }
 
         if (messageLength < 0)
@@ -397,13 +426,13 @@ inline std::int64_t NodeStateFile::scanForMessageTypeOffset(
         }
         else if (0 == messageLength)
         {
-            return Aeron::NULL_VALUE;
+            return NULL_VALUE;
         }
 
-        position += static_cast<std::int32_t>(BitUtil::align(messageLength, ALIGNMENT));
+        position += static_cast<std::int32_t>(BitUtil::align(static_cast<std::int64_t>(messageLength), static_cast<std::int64_t>(8)));
     }
 
-    return Aeron::NULL_VALUE;
+    return NULL_VALUE;
 }
 
 inline void NodeStateFile::syncFile()

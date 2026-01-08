@@ -2,22 +2,22 @@
 #include <memory>
 #include <vector>
 #include "Publication.h"
-#include "../client/ClusterExceptions.h"
-#include "../client/ClusterEvent.h"
-#include "../service/Cluster.h"
+#include "client/ClusterExceptions.h"
+#include "client/ClusterEvent.h"
+#include "service/Cluster.h"
 #include "ClusterMember.h"
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/AtomicBuffer.h"
 #include "util/Exceptions.h"
 #include "util/CloseHelper.h"
 #include <thread>
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/JoinLog.h"
-#include "generated/aeron_cluster_client/ClusterMembersResponse.h"
-#include "generated/aeron_cluster_client/ClusterMembersExtendedResponse.h"
-#include "generated/aeron_cluster_client/ServiceTerminationPosition.h"
-#include "generated/aeron_cluster_client/RequestServiceAck.h"
-#include "generated/aeron_cluster_client/BooleanType.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/JoinLog.h"
+#include "generated/aeron_cluster_codecs/ClusterMembersResponse.h"
+#include "generated/aeron_cluster_codecs/ClusterMembersExtendedResponse.h"
+#include "generated/aeron_cluster_codecs/ServiceTerminationPosition.h"
+#include "generated/aeron_cluster_codecs/RequestServiceAck.h"
+#include "generated/aeron_cluster_codecs/BooleanType.h"
 
 namespace aeron { namespace cluster
 {
@@ -41,7 +41,7 @@ public:
         std::int32_t logSessionId,
         std::int32_t logStreamId,
         bool isStartup,
-        service::Cluster::Role::Value role,
+        service::Role role,
         const std::string& channel);
 
     void clusterMembersResponse(
@@ -66,12 +66,12 @@ private:
     static void checkResult(std::int64_t position, Publication& publication);
 
     BufferClaim m_bufferClaim;
-    MessageHeaderEncoder m_messageHeaderEncoder;
-    JoinLogEncoder m_joinLogEncoder;
-    ClusterMembersResponseEncoder m_clusterMembersResponseEncoder;
-    ServiceTerminationPositionEncoder m_serviceTerminationPositionEncoder;
-    ClusterMembersExtendedResponseEncoder m_clusterMembersExtendedResponseEncoder;
-    RequestServiceAckEncoder m_requestServiceAckEncoder;
+    MessageHeader m_messageHeaderEncoder;
+    JoinLog m_joinLogEncoder;
+    ClusterMembersResponse m_clusterMembersResponseEncoder;
+    ServiceTerminationPosition m_serviceTerminationPositionEncoder;
+    ClusterMembersExtendedResponse m_clusterMembersExtendedResponseEncoder;
+    RequestServiceAck m_requestServiceAckEncoder;
     std::vector<std::uint8_t> m_expandableArrayBufferData;
     AtomicBuffer m_expandableArrayBuffer;
     std::shared_ptr<Publication> m_publication;
@@ -100,10 +100,10 @@ inline void ServiceProxy::joinLog(
     std::int32_t logSessionId,
     std::int32_t logStreamId,
     bool isStartup,
-    service::Cluster::Role::Value role,
+        service::Role role,
     const std::string& channel)
 {
-    const std::int32_t length = MessageHeader::encodedLength() + JoinLog::sbeBlockLength() +
+    const std::int32_t length = MessageHeader::encodedLength() + JoinLog::SBE_BLOCK_LENGTH +
         JoinLog::logChannelHeaderLength() + static_cast<std::int32_t>(channel.length());
     
     std::int64_t position;
@@ -115,7 +115,7 @@ inline void ServiceProxy::joinLog(
         if (position > 0)
         {
             m_joinLogEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .logPosition(logPosition)
                 .maxLogPosition(maxLogPosition)
                 .memberId(memberId)
@@ -123,14 +123,14 @@ inline void ServiceProxy::joinLog(
                 .logStreamId(logStreamId)
                 .isStartup(isStartup ? BooleanType::TRUE : BooleanType::FALSE)
                 .role(static_cast<std::int32_t>(role))
-                .logChannel(channel);
+                .putLogChannel(channel.data(), static_cast<std::uint32_t>(channel.length()));
 
             m_bufferClaim.commit();
             return;
         }
 
         checkResult(position, *m_publication);
-        if (Publication::BACK_PRESSURED == position)
+        if (BACK_PRESSURED == position)
         {
             std::this_thread::yield();
         }
@@ -161,17 +161,17 @@ inline void ServiceProxy::clusterMembersResponse(
         if (result > 0)
         {
             m_clusterMembersResponseEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .correlationId(correlationId)
                 .leaderMemberId(leaderMemberId)
-                .activeMembers(activeMembers)
-                .passiveFollowers(passiveFollowers);
+                .putActiveMembers(activeMembers.data(), static_cast<std::uint32_t>(activeMembers.length()))
+                .putPassiveFollowers(passiveFollowers.data(), static_cast<std::uint32_t>(passiveFollowers.length()));
 
             m_bufferClaim.commit();
             return;
         }
 
-        if (Publication::BACK_PRESSURED == result)
+        if (BACK_PRESSURED == result)
         {
             std::this_thread::yield();
         }
@@ -202,7 +202,7 @@ inline void ServiceProxy::clusterMembersExtendedResponse(
     }
     
     m_clusterMembersExtendedResponseEncoder
-        .wrapAndApplyHeader(m_expandableArrayBuffer, 0, m_messageHeaderEncoder)
+        .wrapAndApplyHeader(reinterpret_cast<char *>(m_expandableArrayBuffer.buffer()), 0, m_expandableArrayBuffer.capacity())
         .correlationId(correlationId)
         .currentTimeNs(currentTimeNs)
         .leaderMemberId(leaderMemberId)
@@ -218,11 +218,11 @@ inline void ServiceProxy::clusterMembersExtendedResponse(
             .logPosition(member.logPosition())
             .timeOfLastAppendNs(member.timeOfLastAppendPositionNs())
             .memberId(member.id())
-            .ingressEndpoint(member.ingressEndpoint())
-            .consensusEndpoint(member.consensusEndpoint())
-            .logEndpoint(member.logEndpoint())
-            .catchupEndpoint(member.catchupEndpoint())
-            .archiveEndpoint(member.archiveEndpoint());
+            .putIngressEndpoint(member.ingressEndpoint().data(), static_cast<std::uint32_t>(member.ingressEndpoint().length()))
+            .putConsensusEndpoint(member.consensusEndpoint().data(), static_cast<std::uint32_t>(member.consensusEndpoint().length()))
+            .putLogEndpoint(member.logEndpoint().data(), static_cast<std::uint32_t>(member.logEndpoint().length()))
+            .putCatchupEndpoint(member.catchupEndpoint().data(), static_cast<std::uint32_t>(member.catchupEndpoint().length()))
+            .putArchiveEndpoint(member.archiveEndpoint().data(), static_cast<std::uint32_t>(member.archiveEndpoint().length()));
     }
 
     m_clusterMembersExtendedResponseEncoder.passiveMembersCount(0);
@@ -241,7 +241,7 @@ inline void ServiceProxy::clusterMembersExtendedResponse(
             return;
         }
 
-        if (Publication::BACK_PRESSURED == result)
+        if (BACK_PRESSURED == result)
         {
             std::this_thread::yield();
         }
@@ -269,14 +269,14 @@ inline void ServiceProxy::terminationPosition(std::int64_t logPosition, const ex
             if (result > 0)
             {
                 m_serviceTerminationPositionEncoder
-                    .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                    .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                     .logPosition(logPosition);
 
                 m_bufferClaim.commit();
                 return;
             }
 
-            if (Publication::BACK_PRESSURED == result)
+            if (BACK_PRESSURED == result)
             {
                 std::this_thread::yield();
             }
@@ -286,8 +286,7 @@ inline void ServiceProxy::terminationPosition(std::int64_t logPosition, const ex
         if (errorHandler)
         {
             errorHandler(ClusterEvent(
-                "failed to send service termination position: result=" + std::to_string(result),
-                SOURCEINFO));
+                "failed to send service termination position: result=" + std::to_string(result)));
         }
     }
 }
@@ -305,14 +304,14 @@ inline void ServiceProxy::requestServiceAck(std::int64_t logPosition)
         if (result > 0)
         {
             m_requestServiceAckEncoder
-                .wrapAndApplyHeader(m_bufferClaim.buffer(), m_bufferClaim.offset(), m_messageHeaderEncoder)
+                .wrapAndApplyHeader(reinterpret_cast<char *>(m_bufferClaim.buffer().buffer()), m_bufferClaim.offset(), m_bufferClaim.buffer().capacity())
                 .logPosition(logPosition);
 
             m_bufferClaim.commit();
             return;
         }
 
-        if (Publication::BACK_PRESSURED == result)
+        if (BACK_PRESSURED == result)
         {
             std::this_thread::yield();
         }
@@ -326,17 +325,17 @@ inline void ServiceProxy::requestServiceAck(std::int64_t logPosition)
 
 inline void ServiceProxy::checkResult(std::int64_t position, Publication& publication)
 {
-    if (Publication::NOT_CONNECTED == position)
+    if (NOT_CONNECTED == position)
     {
         throw ClusterException("publication is not connected", SOURCEINFO);
     }
 
-    if (Publication::CLOSED == position)
+    if (PUBLICATION_CLOSED == position)
     {
         throw ClusterException("publication is closed", SOURCEINFO);
     }
 
-    if (Publication::MAX_POSITION_EXCEEDED == position)
+    if (MAX_POSITION_EXCEEDED == position)
     {
         throw ClusterException(
             "publication at max position: term-length=" + std::to_string(publication.termBufferLength()),

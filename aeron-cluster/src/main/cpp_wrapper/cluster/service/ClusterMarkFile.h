@@ -5,7 +5,7 @@
 #include <functional>
 #include <cstdint>
 #include <limits>
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 #include "util/Exceptions.h"
 #include "util/BitUtil.h"
 // TODO: IoUtil not yet implemented in C++ wrapper

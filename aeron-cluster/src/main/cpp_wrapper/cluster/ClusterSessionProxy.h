@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "generated/aeron_cluster_client/EventCode.h"
+#include "generated/aeron_cluster_codecs/EventCode.h"
 
 namespace aeron { namespace cluster
 {

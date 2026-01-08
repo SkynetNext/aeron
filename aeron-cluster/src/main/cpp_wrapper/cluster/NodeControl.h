@@ -3,8 +3,8 @@
 #include <string>
 #include "Aeron.h"
 #include "AeronCounters.h"
-#include "../client/ClusterExceptions.h"
-#include "../service/ClusterCounters.h"
+#include "client/ClusterExceptions.h"
+#include "service/ClusterCounters.h"
 #include "concurrent/AtomicCounter.h"
 #include "concurrent/CountersReader.h"
 

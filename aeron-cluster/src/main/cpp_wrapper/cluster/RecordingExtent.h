@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <sstream>
-#include "archive/client/AeronArchive.h"
+#include "client/archive/AeronArchive.h"
 
 namespace aeron { namespace cluster
 {
@@ -10,7 +10,7 @@ using namespace aeron::archive::client;
 /**
  * The extent covered by a recording in the archive in terms of position and time.
  */
-class RecordingExtent : public RecordingDescriptorConsumer
+class RecordingExtent
 {
 public:
     /**
@@ -64,7 +64,7 @@ public:
         std::int32_t streamId,
         const std::string& strippedChannel,
         const std::string& originalChannel,
-        const std::string& sourceIdentity) override;
+        const std::string& sourceIdentity);
 
     std::string toString() const;
 };

@@ -1,7 +1,7 @@
 #pragma once
 #include "ClusterBackup.h"
 #include "Aeron.h"
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 #include "util/Exceptions.h"
 
 namespace aeron { namespace cluster

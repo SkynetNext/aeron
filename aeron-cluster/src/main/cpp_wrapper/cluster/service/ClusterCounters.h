@@ -21,7 +21,7 @@
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/CountersReader.h"
 #include "AeronCounters.h"
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 
 namespace aeron { namespace cluster { namespace service
 {

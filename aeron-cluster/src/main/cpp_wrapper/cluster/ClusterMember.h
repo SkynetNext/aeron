@@ -6,13 +6,15 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cstdint>
+#include <thread>
+#include <chrono>
 #include "Aeron.h"
 #include "ExclusivePublication.h"
 #include "ChannelUri.h"
-#include "CommonContext.h"
-#include "archive/client/AeronArchive.h"
-#include "../client/ClusterExceptions.h"
-#include "../client/ClusterEvent.h"
+// CommonContext constants are available through ChannelUri.h
+#include "client/archive/AeronArchive.h"
+#include "client/ClusterExceptions.h"
+#include "client/ClusterEvent.h"
 #include "util/CloseHelper.h"
 #include "util/Exceptions.h"
 
@@ -174,7 +176,7 @@ public:
      * Populate map of ClusterMembers which can be looked up by id.
      */
     static void addClusterMemberIds(
-        const std::vector<ClusterMember>& clusterMembers,
+        std::vector<ClusterMember>& clusterMembers,
         std::unordered_map<std::int32_t, ClusterMember*>& clusterMemberByIdMap);
 
     /**
@@ -700,7 +702,7 @@ inline ClusterMember ClusterMember::parseEndpoints(std::int32_t id, const std::s
 
     if (memberAttributes.size() != 5)
     {
-        throw ClusterException("invalid member value: " + endpoints);
+        throw ClusterException("invalid member value: " + endpoints, SOURCEINFO);
     }
 
     return ClusterMember(
@@ -760,15 +762,15 @@ inline void ClusterMember::addConsensusPublications(
     std::shared_ptr<Aeron> aeron,
     const exception_handler_t& errorHandler)
 {
-    ChannelUri channelUri = ChannelUri::parse(channelTemplate);
+    std::shared_ptr<ChannelUri> channelUri = ChannelUri::parse(channelTemplate);
 
     for (auto& member : members)
     {
         if (member.m_id != thisMember.m_id)
         {
-            channelUri.put(ENDPOINT_PARAM_NAME, member.m_consensusEndpoint);
-            setControlEndpoint(channelUri, bindConsensusControl, thisMember.m_consensusEndpoint);
-            member.m_consensusChannel = channelUri.toString();
+            channelUri->put(ENDPOINT_PARAM_NAME, member.m_consensusEndpoint);
+            setControlEndpoint(*channelUri, bindConsensusControl, thisMember.m_consensusEndpoint);
+            member.m_consensusChannel = channelUri->toString();
             tryAddPublication(member, streamId, aeron, errorHandler);
         }
     }
@@ -785,10 +787,10 @@ inline void ClusterMember::addConsensusPublication(
 {
     if (otherMember.m_consensusChannel.empty())
     {
-        ChannelUri channelUri = ChannelUri::parse(channelTemplate);
-        channelUri.put(ENDPOINT_PARAM_NAME, otherMember.m_consensusEndpoint);
-        setControlEndpoint(channelUri, bindConsensusControl, thisMember.m_consensusEndpoint);
-        otherMember.m_consensusChannel = channelUri.toString();
+        std::shared_ptr<ChannelUri> channelUri = ChannelUri::parse(channelTemplate);
+        channelUri->put(ENDPOINT_PARAM_NAME, otherMember.m_consensusEndpoint);
+        setControlEndpoint(*channelUri, bindConsensusControl, thisMember.m_consensusEndpoint);
+        otherMember.m_consensusChannel = channelUri->toString();
     }
 
     tryAddPublication(otherMember, streamId, aeron, errorHandler);
@@ -802,12 +804,21 @@ inline void ClusterMember::tryAddPublication(
 {
     try
     {
-        member.m_publication = aeron->addExclusivePublication(member.m_consensusChannel, streamId);
+        std::int64_t registrationId = aeron->addExclusivePublication(member.m_consensusChannel, streamId);
+        // Wait for publication to be available
+        while (!member.m_publication)
+        {
+            member.m_publication = aeron->findExclusivePublication(registrationId);
+            if (!member.m_publication)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
     }
     catch (const RegistrationException& ex)
     {
         errorHandler(ClusterException(
-            "failed to add consensus publication for member: " + std::to_string(member.m_id) + " - " + ex.what()));
+            "failed to add consensus publication for member: " + std::to_string(member.m_id) + " - " + ex.what(), SOURCEINFO));
     }
 }
 
@@ -1002,7 +1013,7 @@ inline ClusterMember ClusterMember::determineMember(
     {
         if (!member)
         {
-            throw ClusterException("memberId=" + std::to_string(memberId) + " not found in clusterMembers");
+            throw ClusterException("memberId=" + std::to_string(memberId) + " not found in clusterMembers", SOURCEINFO);
         }
 
         if (!memberEndpoints.empty())
@@ -1023,7 +1034,7 @@ inline void ClusterMember::validateMemberEndpoints(
     if (!areSameEndpoints(member, endpoints))
     {
         throw ClusterException(
-            "clusterMembers and endpoints differ: " + member.m_endpoints + " != " + memberEndpoints);
+            "clusterMembers and endpoints differ: " + member.m_endpoints + " != " + memberEndpoints, SOURCEINFO);
     }
 }
 
@@ -1094,7 +1105,7 @@ inline std::string ClusterMember::ingressEndpoints(const std::vector<ClusterMemb
 
 inline std::string ClusterMember::toString() const
 {
-    return "ClusterMember{" +
+    return std::string("ClusterMember{") +
         "id=" + std::to_string(m_id) +
         ", isBallotSent=" + (m_isBallotSent ? "true" : "false") +
         ", isLeader=" + (m_isLeader ? "true" : "false") +
@@ -1165,7 +1176,7 @@ inline void ClusterMember::parseMember(const std::string& idAndEndpoints, std::v
 
     if (memberAttributes.size() < 6 || 8 < memberAttributes.size())
     {
-        throw ClusterException("invalid member value: " + idAndEndpoints);
+        throw ClusterException("invalid member value: " + idAndEndpoints, SOURCEINFO);
     }
 
     std::int32_t clusterMemberId;
@@ -1175,7 +1186,7 @@ inline void ClusterMember::parseMember(const std::string& idAndEndpoints, std::v
     }
     catch (const std::exception& ex)
     {
-        throw ClusterException("invalid cluster member id, must be an integer value: " + std::string(ex.what()));
+        throw ClusterException("invalid cluster member id, must be an integer value: " + std::string(ex.what()), SOURCEINFO);
     }
 
     const std::string archiveResponseEndpoint = (6 < memberAttributes.size()) ? memberAttributes[6] : "";

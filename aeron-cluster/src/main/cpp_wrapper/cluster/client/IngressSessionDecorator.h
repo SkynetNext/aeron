@@ -17,8 +17,8 @@
 
 #include "Publication.h"
 #include "concurrent/AtomicBuffer.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SessionMessageHeader.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
 #include "Aeron.h"
 
 namespace aeron { namespace cluster { namespace client

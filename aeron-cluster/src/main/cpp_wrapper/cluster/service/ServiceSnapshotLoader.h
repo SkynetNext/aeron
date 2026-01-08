@@ -8,11 +8,11 @@
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/logbuffer/ControlledFragmentHandler.h"
 #include "concurrent/logbuffer/Header.h"
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 #include "ClusterClock.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SnapshotMarker.h"
-#include "generated/aeron_cluster_client/ClientSession.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SnapshotMarker.h"
+#include "generated/aeron_cluster_codecs/ClientSession.h"
 
 namespace aeron { namespace cluster { namespace service
 {

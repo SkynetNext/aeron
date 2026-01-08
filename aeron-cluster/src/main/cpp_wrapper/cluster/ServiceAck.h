@@ -3,7 +3,7 @@
 #include <vector>
 #include <string>
 #include <sstream>
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 
 namespace aeron { namespace cluster
 {
@@ -14,7 +14,7 @@ namespace aeron { namespace cluster
 class ServiceAck
 {
 public:
-    static const std::vector<ServiceAck> EMPTY_SERVICE_ACKS;
+    static const std::vector<aeron::cluster::ServiceAck> EMPTY_SERVICE_ACKS;
 
     ServiceAck(std::int64_t ackId, std::int64_t logPosition, std::int64_t relevantId);
 
@@ -25,11 +25,11 @@ public:
     static bool hasReached(
         std::int64_t logPosition,
         std::int64_t ackId,
-        const std::vector<std::deque<ServiceAck>>& queues);
+        const std::vector<std::deque<aeron::cluster::ServiceAck>>& queues);
 
-    static void removeHead(std::vector<std::deque<ServiceAck>>& queues);
+    static void removeHead(std::vector<std::deque<aeron::cluster::ServiceAck>>& queues);
 
-    static std::vector<std::deque<ServiceAck>> newArrayOfQueues(std::int32_t serviceCount);
+    static std::vector<std::deque<aeron::cluster::ServiceAck>> newArrayOfQueues(std::int32_t serviceCount);
 
     std::string toString() const;
 
@@ -40,34 +40,34 @@ private:
 };
 
 // Implementation
-const std::vector<ServiceAck> ServiceAck::EMPTY_SERVICE_ACKS;
+const std::vector<aeron::cluster::ServiceAck> aeron::cluster::ServiceAck::EMPTY_SERVICE_ACKS;
 
-inline ServiceAck::ServiceAck(std::int64_t ackId, std::int64_t logPosition, std::int64_t relevantId) :
+inline aeron::cluster::ServiceAck::ServiceAck(std::int64_t ackId, std::int64_t logPosition, std::int64_t relevantId) :
     m_ackId(ackId),
     m_logPosition(logPosition),
     m_relevantId(relevantId)
 {
 }
 
-inline std::int64_t ServiceAck::ackId() const
+inline std::int64_t aeron::cluster::ServiceAck::ackId() const
 {
     return m_ackId;
 }
 
-inline std::int64_t ServiceAck::logPosition() const
+inline std::int64_t aeron::cluster::ServiceAck::logPosition() const
 {
     return m_logPosition;
 }
 
-inline std::int64_t ServiceAck::relevantId() const
+inline std::int64_t aeron::cluster::ServiceAck::relevantId() const
 {
     return m_relevantId;
 }
 
-inline bool ServiceAck::hasReached(
+inline bool aeron::cluster::ServiceAck::hasReached(
     std::int64_t logPosition,
     std::int64_t ackId,
-    const std::vector<std::deque<ServiceAck>>& queues)
+    const std::vector<std::deque<aeron::cluster::ServiceAck>>& queues)
 {
     for (std::size_t serviceId = 0; serviceId < queues.size(); serviceId++)
     {
@@ -77,7 +77,7 @@ inline bool ServiceAck::hasReached(
             return false;
         }
 
-        const ServiceAck& serviceAck = queue.front();
+        const aeron::cluster::ServiceAck& serviceAck = queue.front();
         if (serviceAck.m_ackId != ackId || serviceAck.m_logPosition != logPosition)
         {
             throw ClusterException(
@@ -93,7 +93,7 @@ inline bool ServiceAck::hasReached(
     return true;
 }
 
-inline void ServiceAck::removeHead(std::vector<std::deque<ServiceAck>>& queues)
+inline void aeron::cluster::ServiceAck::removeHead(std::vector<std::deque<aeron::cluster::ServiceAck>>& queues)
 {
     for (auto& queue : queues)
     {
@@ -104,12 +104,12 @@ inline void ServiceAck::removeHead(std::vector<std::deque<ServiceAck>>& queues)
     }
 }
 
-inline std::vector<std::deque<ServiceAck>> ServiceAck::newArrayOfQueues(std::int32_t serviceCount)
+inline std::vector<std::deque<aeron::cluster::ServiceAck>> aeron::cluster::ServiceAck::newArrayOfQueues(std::int32_t serviceCount)
 {
-    return std::vector<std::deque<ServiceAck>>(serviceCount);
+    return std::vector<std::deque<aeron::cluster::ServiceAck>>(serviceCount);
 }
 
-inline std::string ServiceAck::toString() const
+inline std::string aeron::cluster::ServiceAck::toString() const
 {
     std::ostringstream oss;
     oss << "ServiceAck{ackId=" << m_ackId

@@ -3,12 +3,13 @@
 #include "ExclusivePublication.h"
 #include "Image.h"
 #include "Publication.h"
-#include "../client/ClusterExceptions.h"
-#include "../service/Cluster.h"
-#include "concurrent/logbuffer/ControlledFragmentHandler.h"
+#include "client/ClusterExceptions.h"
+#include "service/Cluster.h"
+// #include "concurrent/logbuffer/ControlledFragmentHandler.h" // Not available in C++ wrapper
+#include "Image.h"  // For ControlledPollAction
 #include "concurrent/logbuffer/Header.h"
 #include "concurrent/AtomicBuffer.h"
-#include "generated/aeron_cluster_client/CloseReason.h"
+#include "generated/aeron_cluster_codecs/CloseReason.h"
 #include "ConsensusModuleControl.h"
 #include "ConsensusControlState.h"
 

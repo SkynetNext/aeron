@@ -8,7 +8,7 @@
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/AtomicBuffer.h"
 #include "ClientSession.h"
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 #include "util/Exceptions.h"
 
 namespace aeron { namespace cluster { namespace service

@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <thread>
+#include <chrono>
 #include "Aeron.h"
 #include "Counter.h"
 #include "Publication.h"
@@ -92,21 +94,21 @@ public:
 
     std::int64_t timeOfLastActivityNs() override;
 
-    void timeOfLastActivityNs(std::int64_t timeNs);
+    void timeOfLastActivityNs(std::int64_t timeNs) override;
 
     void loadSnapshotState(
         std::int64_t correlationId,
         std::int64_t openedLogPosition,
         std::int64_t timeOfLastActivityNs,
-        CloseReason closeReason);
+        CloseReason::Value closeReason);
 
     std::int32_t responseStreamId() const;
 
     std::string responseChannel() const;
 
-    void closing(CloseReason closeReason);
+    void closing(CloseReason::Value closeReason);
 
-    CloseReason closeReason() const override;
+    CloseReason::Value closeReason() const;
 
     void resetCloseReason();
 
@@ -149,13 +151,13 @@ public:
 
     void lastActivityNs(std::int64_t timeNs, std::int64_t correlationId);
 
-    void reject(EventCode code, const std::string& responseDetail, DistinctErrorLog* errorLog);
+    void reject(EventCode::Value code, const std::string& responseDetail, concurrent::errors::DistinctErrorLog* errorLog);
 
-    EventCode eventCode() const;
+    EventCode::Value eventCode() const;
 
     std::string responseDetail() const;
 
-    std::int64_t correlationId() const override;
+    std::int64_t correlationId() const;
 
     std::int64_t openedLogPosition() const;
 
@@ -218,8 +220,8 @@ private:
     std::shared_ptr<Counter> m_counter;
     ClusterSessionState m_state = ClusterSessionState::INIT;
     std::string m_responseDetail;
-    EventCode m_eventCode = EventCode::NULL_VAL;
-    CloseReason m_closeReason = CloseReason::NULL_VAL;
+    EventCode::Value m_eventCode = EventCode::Value::NULL_VALUE;
+    CloseReason::Value m_closeReason = CloseReason::Value::NULL_VALUE;
     std::vector<std::uint8_t> m_encodedPrincipal;
     ClusterSessionAction m_action = ClusterSessionAction::CLIENT;
     std::shared_ptr<void> m_requestInput;
@@ -285,14 +287,14 @@ inline void ClusterSession::loadSnapshotState(
     std::int64_t correlationId,
     std::int64_t openedLogPosition,
     std::int64_t timeOfLastActivityNs,
-    CloseReason closeReason)
+    CloseReason::Value closeReason)
 {
     m_openedLogPosition = openedLogPosition;
     m_timeOfLastActivityNs = timeOfLastActivityNs;
     m_correlationId = correlationId;
     m_closeReason = closeReason;
 
-    if (CloseReason::NULL_VAL != closeReason)
+    if (CloseReason::Value::NULL_VALUE != closeReason)
     {
         state(ClusterSessionState::CLOSING, "closeReason=" + std::to_string(static_cast<std::int32_t>(closeReason)));
     }
@@ -312,7 +314,7 @@ inline std::string ClusterSession::responseChannel() const
     return m_responseChannel;
 }
 
-inline void ClusterSession::closing(CloseReason closeReason)
+inline void ClusterSession::closing(CloseReason::Value closeReason)
 {
     m_closeReason = closeReason;
     m_hasOpenEventPending = false;
@@ -321,7 +323,7 @@ inline void ClusterSession::closing(CloseReason closeReason)
     state(ClusterSessionState::CLOSING, "closeReason=" + std::to_string(static_cast<std::int32_t>(closeReason)));
 }
 
-inline CloseReason ClusterSession::closeReason() const
+inline CloseReason::Value ClusterSession::closeReason() const
 {
     return m_closeReason;
 }
@@ -329,7 +331,7 @@ inline CloseReason ClusterSession::closeReason() const
 inline void ClusterSession::resetCloseReason()
 {
     m_closedLogPosition = 0; // NULL_POSITION
-    m_closeReason = CloseReason::NULL_VAL;
+    m_closeReason = CloseReason::Value::NULL_VALUE;
 }
 
 inline void ClusterSession::asyncConnect(
@@ -338,7 +340,7 @@ inline void ClusterSession::asyncConnect(
     std::int32_t clusterId)
 {
     m_counterRegistrationId = addSessionCounter(aeron, tempBuffer, clusterId);
-    m_responsePublicationId = aeron->asyncAddPublication(m_responseChannel, m_responseStreamId);
+    m_responsePublicationId = aeron->addPublication(m_responseChannel, m_responseStreamId);
 }
 
 inline void ClusterSession::connect(
@@ -349,19 +351,30 @@ inline void ClusterSession::connect(
 {
     if (m_responsePublication)
     {
-        throw ClusterException("response publication already added");
+        throw ClusterException("response publication already added", SOURCEINFO);
     }
 
     m_counterRegistrationId = addSessionCounter(aeron, tempBuffer, clusterId);
 
     try
     {
-        m_responsePublication = aeron->addPublication(m_responseChannel, m_responseStreamId);
+        std::int64_t registrationId = aeron->addPublication(m_responseChannel, m_responseStreamId);
+        // Wait for publication to become available
+        std::shared_ptr<Publication> publication;
+        while (!publication)
+        {
+            publication = aeron->findPublication(registrationId);
+            if (!publication)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
+        m_responsePublication = publication;
     }
-    catch (const RegistrationException& ex)
+    catch (const std::exception& ex)
     {
         errorHandler(ClusterException(
-            "failed to connect session response publication: " + ex.what(), ExceptionCategory::WARN));
+            "failed to connect session response publication: " + std::string(ex.what()), SOURCEINFO));
     }
 }
 
@@ -371,7 +384,7 @@ inline void ClusterSession::disconnect(
 {
     if (0 != m_responsePublicationId) // NULL_VALUE
     {
-        aeron->asyncRemovePublication(m_responsePublicationId);
+        // Publications are automatically removed when closed/reset
         m_responsePublicationId = 0; // NULL_VALUE
     }
     else
@@ -382,7 +395,8 @@ inline void ClusterSession::disconnect(
     
     if (0 != m_counterRegistrationId) // NULL_VALUE
     {
-        aeron->asyncRemoveCounter(m_counterRegistrationId);
+        // Counters are automatically removed when closed/reset
+        m_counter.reset();
         m_counterRegistrationId = 0; // NULL_VALUE
     }
     else
@@ -398,13 +412,23 @@ inline bool ClusterSession::isResponsePublicationConnected(
 {
     if (!m_responsePublication)
     {
-        if (!aeron->isCommandActive(m_responsePublicationId))
+        // Check if publication is available
+        if (m_responsePublicationId != 0)
         {
-            m_responsePublication = aeron->getPublication(m_responsePublicationId);
-            m_responsePublicationId = 0; // NULL_VALUE
+            m_responsePublication = aeron->findPublication(m_responsePublicationId);
+            if (m_responsePublication)
+            {
+                m_responsePublicationId = 0; // NULL_VALUE
+            }
 
-            m_counter = aeron->getCounter(m_counterRegistrationId);
-            m_counterRegistrationId = 0; // NULL_VALUE
+            if (m_counterRegistrationId != 0)
+            {
+                m_counter = aeron->findCounter(m_counterRegistrationId);
+                if (m_counter)
+                {
+                    m_counterRegistrationId = 0; // NULL_VALUE
+                }
+            }
 
             if (m_responsePublication)
             {
@@ -437,7 +461,7 @@ inline std::int64_t ClusterSession::tryClaim(std::int32_t length, BufferClaim& b
 {
     if (!m_responsePublication)
     {
-        return Publication::NOT_CONNECTED;
+        return NOT_CONNECTED;
     }
     else
     {
@@ -452,7 +476,7 @@ inline std::int64_t ClusterSession::offer(
 {
     if (!m_responsePublication)
     {
-        return Publication::NOT_CONNECTED;
+        return NOT_CONNECTED;
     }
     else
     {
@@ -532,9 +556,9 @@ inline void ClusterSession::lastActivityNs(std::int64_t timeNs, std::int64_t cor
 }
 
 inline void ClusterSession::reject(
-    EventCode code,
+    EventCode::Value code,
     const std::string& responseDetail,
-    DistinctErrorLog* errorLog)
+    concurrent::errors::DistinctErrorLog* errorLog)
 {
     m_eventCode = code;
     m_responseDetail = responseDetail;
@@ -549,7 +573,7 @@ inline void ClusterSession::reject(
     }
 }
 
-inline EventCode ClusterSession::eventCode() const
+inline EventCode::Value ClusterSession::eventCode() const
 {
     return m_eventCode;
 }
@@ -644,13 +668,13 @@ inline void ClusterSession::checkEncodedPrincipalLength(const std::vector<std::u
     {
         throw ClusterException(
             "encoded principal max length " + std::to_string(MAX_ENCODED_PRINCIPAL_LENGTH) +
-            " exceeded: length=" + std::to_string(encodedPrincipal.size()));
+            " exceeded: length=" + std::to_string(encodedPrincipal.size()), SOURCEINFO);
     }
 }
 
 inline std::string ClusterSession::toString() const
 {
-    return "ClusterSession{" +
+    return std::string("ClusterSession{") +
         "id=" + std::to_string(m_id) +
         ", clusterMemberId=" + std::to_string(m_clusterMemberId) +
         ", responseStreamId=" + std::to_string(m_responseStreamId) +
@@ -683,22 +707,12 @@ inline std::int64_t ClusterSession::addSessionCounter(
 
     const std::int32_t keyLength = sizeof(std::int32_t) + sizeof(std::int64_t);
 
-    std::int32_t labelLength = 0;
-    labelLength += tempBuffer.putStringWithoutLength(keyLength + labelLength, "cluster-session: ");
-    labelLength += tempBuffer.putStringWithoutLength(keyLength + labelLength, m_sessionInfo);
-    labelLength += tempBuffer.putStringWithoutLength(
-        keyLength + labelLength, ClusterCounters::CLUSTER_ID_LABEL_SUFFIX);
-    std::string clusterIdStr = std::to_string(clusterId);
-    labelLength += tempBuffer.putStringWithoutLength(keyLength + labelLength, clusterIdStr);
-
-    return aeron->asyncAddCounter(
+    std::string label = "cluster-session: " + m_sessionInfo + ClusterCounters::CLUSTER_ID_LABEL_SUFFIX + std::to_string(clusterId);
+    return aeron->addCounter(
         AeronCounters::CLUSTER_SESSION_TYPE_ID,
-        tempBuffer,
-        0,
+        tempBuffer.buffer(),
         keyLength,
-        tempBuffer,
-        keyLength,
-        labelLength);
+        label);
 }
 
 inline void ClusterSession::logStateChange(
@@ -720,8 +734,8 @@ inline void ClusterSession::logStateChange(
 // These are placed here to resolve circular dependency
 
 // LogPublisher::appendSessionOpen
-inline std::int64_t LogPublisher::appendSessionOpen(
-    ClusterSession& session,
+inline std::int64_t cluster::LogPublisher::appendSessionOpen(
+    cluster::ClusterSession& session,
     std::int64_t leadershipTermId,
     std::int64_t timestamp)
 {
@@ -736,12 +750,12 @@ inline std::int64_t LogPublisher::appendSessionOpen(
         .correlationId(session.correlationId())
         .timestamp(timestamp)
         .responseStreamId(session.responseStreamId())
-        .responseChannel(channel)
+        .putResponseChannel(channel.data(), static_cast<std::uint32_t>(channel.length()))
         .putEncodedPrincipal(reinterpret_cast<const char *>(encodedPrincipal.data()), static_cast<std::uint32_t>(encodedPrincipal.size()));
 
-    const std::int32_t length = MessageHeader::encodedLength() + m_sessionOpenEvent.encodedLength();
+    const std::int32_t length = codecs::MessageHeader::encodedLength() + m_sessionOpenEvent.encodedLength();
 
-    int attempts = LogPublisher::SEND_ATTEMPTS;
+    int attempts = cluster::LogPublisher::SEND_ATTEMPTS;
     do
     {
         AtomicBuffer expandableBuffer;
@@ -752,7 +766,7 @@ inline std::int64_t LogPublisher::appendSessionOpen(
             break;
         }
 
-        LogPublisher::checkResult(position, *m_publication);
+        cluster::LogPublisher::checkResult(position, *m_publication);
     }
     while (--attempts > 0);
 
@@ -760,16 +774,16 @@ inline std::int64_t LogPublisher::appendSessionOpen(
 }
 
 // LogPublisher::appendSessionClose
-inline bool LogPublisher::appendSessionClose(
+inline bool cluster::LogPublisher::appendSessionClose(
     std::int32_t memberId,
-    ClusterSession& session,
+    cluster::ClusterSession& session,
     std::int64_t leadershipTermId,
     std::int64_t timestamp,
     std::chrono::milliseconds::rep timeUnit)
 {
-    const std::int32_t length = MessageHeader::encodedLength() + SessionCloseEvent::SBE_BLOCK_LENGTH;
+    const std::int32_t length = codecs::MessageHeader::encodedLength() + codecs::SessionCloseEvent::SBE_BLOCK_LENGTH;
 
-    int attempts = LogPublisher::SEND_ATTEMPTS;
+    int attempts = cluster::LogPublisher::SEND_ATTEMPTS;
     do
     {
         const std::int64_t position = m_publication->tryClaim(length, m_bufferClaim);
@@ -786,7 +800,7 @@ inline bool LogPublisher::appendSessionClose(
             return true;
         }
 
-        LogPublisher::checkResult(position, *m_publication);
+        cluster::LogPublisher::checkResult(position, *m_publication);
     }
     while (--attempts > 0);
 
@@ -794,20 +808,20 @@ inline bool LogPublisher::appendSessionClose(
 }
 
 // EgressPublisher::sendEvent
-inline bool EgressPublisher::sendEvent(
-    ClusterSession& session,
+inline bool cluster::EgressPublisher::sendEvent(
+    cluster::ClusterSession& session,
     std::int64_t leadershipTermId,
     std::int32_t leaderMemberId,
-    EventCode::Value code,
+    codecs::EventCode::Value code,
     const std::string& detail)
 {
     const std::int32_t length = static_cast<std::int32_t>(
-        MessageHeader::encodedLength() +
-        SessionEvent::SBE_BLOCK_LENGTH +
-        SessionEvent::detailHeaderLength() +
+        codecs::MessageHeader::encodedLength() +
+        codecs::SessionEvent::SBE_BLOCK_LENGTH +
+        codecs::SessionEvent::detailHeaderLength() +
         detail.length());
 
-    int attempts = EgressPublisher::SEND_ATTEMPTS;
+    int attempts = cluster::EgressPublisher::SEND_ATTEMPTS;
     do
     {
         const std::int64_t position = session.tryClaim(length, m_bufferClaim);
@@ -834,7 +848,7 @@ inline bool EgressPublisher::sendEvent(
 }
 
 // EgressPublisher::sendChallenge
-inline bool EgressPublisher::sendChallenge(ClusterSession& session, const std::vector<std::uint8_t>& encodedChallenge)
+inline bool cluster::EgressPublisher::sendChallenge(cluster::ClusterSession& session, const std::vector<std::uint8_t>& encodedChallenge)
 {
     AtomicBuffer challengeBuffer;
     challengeBuffer.wrap(m_buffer.buffer(), m_buffer.capacity());
@@ -849,9 +863,9 @@ inline bool EgressPublisher::sendChallenge(ClusterSession& session, const std::v
     }
 
     const std::int32_t length = static_cast<std::int32_t>(
-        MessageHeader::encodedLength() + m_challengeEncoder.encodedLength());
+        codecs::MessageHeader::encodedLength() + m_challengeEncoder.encodedLength());
 
-    int attempts = EgressPublisher::SEND_ATTEMPTS;
+    int attempts = cluster::EgressPublisher::SEND_ATTEMPTS;
     do
     {
         util::DirectBuffer directBuffer(m_buffer.buffer(), m_buffer.capacity());
@@ -867,19 +881,19 @@ inline bool EgressPublisher::sendChallenge(ClusterSession& session, const std::v
 }
 
 // EgressPublisher::newLeader
-inline bool EgressPublisher::newLeader(
-    ClusterSession& session,
+inline bool cluster::EgressPublisher::newLeader(
+    cluster::ClusterSession& session,
     std::int64_t leadershipTermId,
     std::int32_t leaderMemberId,
     const std::string& ingressEndpoints)
 {
     const std::int32_t length = static_cast<std::int32_t>(
-        MessageHeader::encodedLength() +
-        NewLeaderEvent::SBE_BLOCK_LENGTH +
-        NewLeaderEvent::ingressEndpointsHeaderLength() +
+        codecs::MessageHeader::encodedLength() +
+        codecs::NewLeaderEvent::SBE_BLOCK_LENGTH +
+        codecs::NewLeaderEvent::ingressEndpointsHeaderLength() +
         ingressEndpoints.length());
 
-    int attempts = EgressPublisher::SEND_ATTEMPTS;
+    int attempts = cluster::EgressPublisher::SEND_ATTEMPTS;
     do
     {
         const std::int64_t position = session.tryClaim(length, m_bufferClaim);
@@ -902,11 +916,11 @@ inline bool EgressPublisher::newLeader(
 }
 
 // EgressPublisher::sendAdminResponse
-inline bool EgressPublisher::sendAdminResponse(
-    ClusterSession& session,
+inline bool cluster::EgressPublisher::sendAdminResponse(
+    cluster::ClusterSession& session,
     std::int64_t correlationId,
-    AdminRequestType::Value adminRequestType,
-    AdminResponseCode::Value responseCode,
+    codecs::AdminRequestType::Value adminRequestType,
+    codecs::AdminResponseCode::Value responseCode,
     const std::string& message)
 {
     AtomicBuffer adminBuffer;
@@ -921,9 +935,9 @@ inline bool EgressPublisher::sendAdminResponse(
         .putPayload(nullptr, 0);
 
     const std::int32_t length = static_cast<std::int32_t>(
-        MessageHeader::encodedLength() + m_adminResponseEncoder.encodedLength());
+        codecs::MessageHeader::encodedLength() + m_adminResponseEncoder.encodedLength());
 
-    int attempts = EgressPublisher::SEND_ATTEMPTS;
+    int attempts = cluster::EgressPublisher::SEND_ATTEMPTS;
     do
     {
         util::DirectBuffer directBuffer(m_buffer.buffer(), m_buffer.capacity());

@@ -3,18 +3,17 @@
 #include <memory>
 #include <cstdint>
 #include <string>
-#include "archive/client/AeronArchive.h"
-#include "archive/codecs/RecordingSignal.h"
-#include "archive/client/archive/RecordingPos.h"
-#include "../client/ClusterExceptions.h"
+#include "client/archive/AeronArchive.h"
+#include "client/archive/AeronArchive.h"  // For RecordingSignal
+#include "client/archive/RecordingPos.h"
+#include "client/ClusterExceptions.h"
 #include "util/Exceptions.h"
-#include "concurrent/status/CountersReader.h"
+#include "concurrent/CountersReader.h"
 #include "Aeron.h"
 
 namespace aeron { namespace cluster {
 
 using namespace aeron::archive::client;
-using namespace aeron::archive::codecs;
 
 /**
  * Replication of a single recording.
@@ -27,7 +26,7 @@ public:
         std::int64_t srcRecordingId,
         const std::string& srcArchiveChannel,
         std::int32_t srcControlStreamId,
-        const ReplicationParams& replicationParams,
+        ReplicationParams& replicationParams,
         std::int64_t progressCheckTimeoutNs,
         std::int64_t progressCheckIntervalNs,
         std::int64_t nowNs);
@@ -74,7 +73,7 @@ private:
     std::int64_t m_progressDeadlineNs;
     std::int64_t m_progressCheckDeadlineNs;
     std::shared_ptr<AeronArchive> m_archive;
-    RecordingSignal m_lastRecordingSignal = RecordingSignal::NULL_VAL;
+    RecordingSignal m_lastRecordingSignal;  // Will be initialized with NULL_VALUE
 
     bool m_hasReplicationEnded = false;
     bool m_hasSynced = false;
@@ -87,7 +86,7 @@ inline RecordingReplication::RecordingReplication(
     std::int64_t srcRecordingId,
     const std::string& srcArchiveChannel,
     std::int32_t srcControlStreamId,
-    const ReplicationParams& replicationParams,
+    ReplicationParams& replicationParams,
     std::int64_t progressCheckTimeoutNs,
     std::int64_t progressCheckIntervalNs,
     std::int64_t nowNs) :
@@ -97,7 +96,8 @@ inline RecordingReplication::RecordingReplication(
     m_progressCheckIntervalNs(progressCheckIntervalNs),
     m_srcArchiveChannel(srcArchiveChannel),
     m_progressDeadlineNs(nowNs + progressCheckTimeoutNs),
-    m_progressCheckDeadlineNs(nowNs + progressCheckIntervalNs)
+    m_progressCheckDeadlineNs(nowNs + progressCheckIntervalNs),
+    m_lastRecordingSignal(0, 0, 0, 0, static_cast<std::int32_t>(RecordingSignal::Value::NULL_VALUE))
 {
     m_replicationId = archive->replicate(
         srcRecordingId,
@@ -150,7 +150,7 @@ inline std::int32_t RecordingReplication::poll(std::int64_t nowNs)
 
         if (nowNs >= m_progressDeadlineNs)
         {
-            if (aeron::NULL_POSITION == m_stopPosition || m_position < m_stopPosition)
+            if (NULL_POSITION == m_stopPosition || m_position < m_stopPosition)
             {
                 throw ClusterException("log replication has not progressed", SOURCEINFO);
             }
@@ -210,41 +210,41 @@ inline void RecordingReplication::onSignal(
 {
     if (correlationId == m_replicationId)
     {
-        if (RecordingSignal::EXTEND == signal)
+        if (RecordingSignal::Value::EXTEND == static_cast<RecordingSignal::Value>(signal.m_recordingSignalCode))
         {
-            auto counters = m_archive->context().aeron()->countersReader();
+            auto& counters = m_archive->context().aeron()->countersReader();
             m_recordingPositionCounterId =
-                RecordingPos::findCounterIdByRecordingId(*counters, recordingId);
+                RecordingPos::findCounterIdByRecordingId(counters, recordingId);
         }
-        else if (RecordingSignal::SYNC == signal)
+        else if (RecordingSignal::Value::SYNC == static_cast<RecordingSignal::Value>(signal.m_recordingSignalCode))
         {
             m_hasSynced = true;
         }
-        else if (RecordingSignal::REPLICATE_END == signal)
+        else if (RecordingSignal::Value::REPLICATE_END == static_cast<RecordingSignal::Value>(signal.m_recordingSignalCode))
         {
             m_hasReplicationEnded = true;
         }
-        else if (RecordingSignal::STOP == signal)
+        else if (RecordingSignal::Value::STOP == static_cast<RecordingSignal::Value>(signal.m_recordingSignalCode))
         {
-            if (aeron::NULL_POSITION != position)
+            if (NULL_POSITION != position)
             {
                 m_position = position;
             }
             m_hasStopped = true;
         }
-        else if (RecordingSignal::DELETE == signal)
+        else if (RecordingSignal::Value::ABC_DELETE == static_cast<RecordingSignal::Value>(signal.m_recordingSignalCode))
         {
             throw ClusterException("recording was deleted during replication: " + toString(), SOURCEINFO);
         }
 
-        m_lastRecordingSignal = signal;
+        m_lastRecordingSignal = signal;  // Store the signal object
 
         if (aeron::NULL_VALUE != recordingId)
         {
             m_recordingId = recordingId;
         }
 
-        if (aeron::NULL_POSITION != position)
+        if (NULL_POSITION != position)
         {
             m_position = position;
         }
@@ -255,10 +255,10 @@ inline bool RecordingReplication::pollDstRecordingPosition()
 {
     if (CountersReader::NULL_COUNTER_ID != m_recordingPositionCounterId)
     {
-        auto counters = m_archive->context().aeron()->countersReader();
-        const std::int64_t recordingPosition = counters->getCounterValue(m_recordingPositionCounterId);
+        auto& counters = m_archive->context().aeron()->countersReader();
+        const std::int64_t recordingPosition = counters.getCounterValue(m_recordingPositionCounterId);
 
-        if (RecordingPos::isActive(*counters, m_recordingPositionCounterId, m_recordingId) &&
+        if (RecordingPos::isActive(counters, m_recordingPositionCounterId, m_recordingId) &&
             recordingPosition > m_position)
         {
             m_position = recordingPosition;
@@ -276,7 +276,7 @@ inline std::string RecordingReplication::srcArchiveChannel() const
 
 inline std::string RecordingReplication::toString() const
 {
-    return "RecordingReplication{" +
+    return std::string("RecordingReplication{") +
         "replicationId=" + std::to_string(m_replicationId) +
         ", stopPosition=" + std::to_string(m_stopPosition) +
         ", progressCheckTimeoutNs=" + std::to_string(m_progressCheckTimeoutNs) +
@@ -286,7 +286,7 @@ inline std::string RecordingReplication::toString() const
         ", position=" + std::to_string(m_position) +
         ", progressDeadlineNs=" + std::to_string(m_progressDeadlineNs) +
         ", progressCheckDeadlineNs=" + std::to_string(m_progressCheckDeadlineNs) +
-        ", lastRecordingSignal=" + std::to_string(static_cast<std::int32_t>(m_lastRecordingSignal)) +
+        ", lastRecordingSignal=" + std::to_string(m_lastRecordingSignal.m_recordingSignalCode) +
         ", hasReplicationEnded=" + (m_hasReplicationEnded ? "true" : "false") +
         ", hasSynced=" + (m_hasSynced ? "true" : "false") +
         ", hasStopped=" + (m_hasStopped ? "true" : "false") +

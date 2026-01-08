@@ -7,14 +7,14 @@
 #include <string>
 #include "ExclusivePublication.h"
 #include "Image.h"
-#include "../client/AeronCluster.h"
-#include "../client/ClusterExceptions.h"
+#include "client/AeronCluster.h"
+#include "client/ClusterExceptions.h"
 #include "generated/aeron_cluster_codecs/CloseReason.h"
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/logbuffer/Header.h"
 #include "util/DirectBuffer.h"
 #include "concurrent/IdleStrategy.h"
-#include "concurrent/status/AtomicCounter.h"
+#include "concurrent/AtomicCounter.h"
 #include "ClientSession.h"
 
 namespace aeron { namespace cluster { namespace service {
@@ -66,7 +66,7 @@ inline Role getRole(std::int64_t code)
  */
 inline Role getRole(std::shared_ptr<AtomicCounter> counter)
 {
-    if (counter->isClosed())
+    if (!counter)
     {
         return Role::FOLLOWER;
     }
@@ -114,7 +114,8 @@ public:
      *
      * @return the ClusteredServiceContainer::Context under which the container is running.
      */
-    virtual ClusteredServiceContainer::Context& context() = 0;
+    // TODO: Implement ClusteredServiceContainer::Context
+    // virtual ClusteredServiceContainer::Context& context() = 0;
 
     /**
      * Get the ClientSession for a given cluster session id.

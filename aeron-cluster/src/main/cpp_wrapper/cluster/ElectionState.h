@@ -1,6 +1,6 @@
 #pragma once
 #include <vector>
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 #include "concurrent/AtomicCounter.h"
 
 namespace aeron { namespace cluster
@@ -125,7 +125,7 @@ inline ElectionState getElectionState(std::int64_t code)
 {
     if (code < 0 || code > 17)
     {
-        throw ClusterException("invalid election state counter code: " + std::to_string(code));
+        throw ClusterException("invalid election state counter code: " + std::to_string(code), SOURCEINFO);
     }
 
     return static_cast<ElectionState>(code);
@@ -139,7 +139,7 @@ inline ElectionState getElectionState(std::int64_t code)
  */
 inline ElectionState getElectionState(std::shared_ptr<AtomicCounter> counter)
 {
-    if (counter->isClosed())
+    if (counter == nullptr)
     {
         return ElectionState::CLOSED;
     }

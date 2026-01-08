@@ -9,10 +9,10 @@
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/IdleStrategy.h"
 #include "concurrent/AgentInvoker.h"
-#include "../client/ClusterExceptions.h"
+#include "client/ClusterExceptions.h"
 #include "ClusterClock.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SnapshotMarker.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SnapshotMarker.h"
 
 namespace aeron { namespace cluster { namespace service
 {

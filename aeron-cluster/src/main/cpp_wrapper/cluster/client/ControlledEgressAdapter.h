@@ -22,11 +22,11 @@
 #include "ClusterExceptions.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/logbuffer/Header.h"
-#include "generated/aeron_cluster_client/MessageHeader.h"
-#include "generated/aeron_cluster_client/SessionMessageHeader.h"
-#include "generated/aeron_cluster_client/SessionEvent.h"
-#include "generated/aeron_cluster_client/NewLeaderEvent.h"
-#include "generated/aeron_cluster_client/AdminResponse.h"
+#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionEvent.h"
+#include "generated/aeron_cluster_codecs/NewLeaderEvent.h"
+#include "generated/aeron_cluster_codecs/AdminResponse.h"
 #include "AeronCluster.h"
 
 namespace aeron { namespace cluster { namespace client
