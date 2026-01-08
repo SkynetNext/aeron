@@ -49,6 +49,33 @@ public:
         SourcedException(category, message, SOURCEINFO)
     {
     }
+
+    /**
+     * Cluster event with provided message and source location.
+     *
+     * @param message  to detail the event.
+     * @param function the function name.
+     * @param file     the file name.
+     * @param line     the line number.
+     */
+    ClusterEvent(const std::string& message, const char* function, const char* file, int line) :
+        SourcedException(ExceptionCategory::EXCEPTION_CATEGORY_WARN, message, function, file, line)
+    {
+    }
+
+    /**
+     * Cluster event with provided message, category, and source location.
+     *
+     * @param message  to detail the event.
+     * @param category of the event.
+     * @param function the function name.
+     * @param file     the file name.
+     * @param line     the line number.
+     */
+    ClusterEvent(const std::string& message, ExceptionCategory category, const char* function, const char* file, int line) :
+        SourcedException(category, message, function, file, line)
+    {
+    }
 };
 
 }}}
