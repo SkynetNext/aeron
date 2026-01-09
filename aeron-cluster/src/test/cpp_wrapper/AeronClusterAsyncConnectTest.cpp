@@ -234,6 +234,24 @@ TEST_F(AeronClusterAsyncConnectTest, shouldCloseIngressPublicationsOnMembers) {
   (void)deadlineNs; // Used in Java for timeout checks
   auto asyncConnect = AeronCluster::asyncConnect(m_context);
 
+  // Java version uses mock, so first poll() immediately gets
+  // CREATE_INGRESS_PUBLICATIONS C++ version uses real driver, so we need to
+  // poll until subscription is created and state transitions to
+  // CREATE_INGRESS_PUBLICATIONS
+  int maxPolls = 100;
+  while (asyncConnect->state() ==
+             AeronCluster::AsyncConnect::State::CREATE_EGRESS_SUBSCRIPTION &&
+         maxPolls-- > 0) {
+    EXPECT_EQ(nullptr, asyncConnect->poll());
+    // Invoke conductor to process subscription creation
+    if (m_aeron->usesAgentInvoker()) {
+      m_aeron->conductorAgentInvoker().invoke();
+    }
+    // Give driver time to process subscription creation
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  EXPECT_GT(maxPolls, 0) << "Timeout waiting for subscription creation";
   EXPECT_EQ(nullptr, asyncConnect->poll());
   EXPECT_EQ(AeronCluster::AsyncConnect::State::CREATE_INGRESS_PUBLICATIONS,
             asyncConnect->state());
