@@ -113,6 +113,9 @@ protected:
 
 TEST_F(EgressPollerTestFixture, shouldIgnoreUnknownMessageSchema)
 {
+    // Reset poller state (in case it was set by previous test)
+    m_egressPoller->poll();
+    
     const std::int32_t offset = 64;
     
     // Create a ControlResponse message from archive codec (unknown schema for cluster)
