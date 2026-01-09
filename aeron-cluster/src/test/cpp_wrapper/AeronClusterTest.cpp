@@ -29,6 +29,7 @@
 #include "Subscription.h"
 #include "Image.h"
 #include "TestUtil.h"
+#include "aeronc.h"
 #include "concurrent/logbuffer/Header.h"
 #include "concurrent/logbuffer/DataFrameHeader.h"
 #include "concurrent/logbuffer/BufferClaim.h"
@@ -120,15 +121,48 @@ public:
         // Create subscription for egress
         std::int64_t subId = m_aeron->addSubscription("aeron:udp?endpoint=localhost:24325", 10);
         invoker.invoke();  // Process async operations
-        POLL_FOR_NON_NULL(m_egressSubscription, m_aeron->findSubscription(subId), invoker);
+        m_egressSubscription = m_aeron->findSubscription(subId);
+        
+        std::int64_t t0 = aeron_epoch_clock();
+        while (!m_egressSubscription)
+        {
+            invoker.invoke();
+            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
+            {
+                throw std::runtime_error("Timeout waiting for egress subscription");
+            }
+            std::this_thread::yield();
+            m_egressSubscription = m_aeron->findSubscription(subId);
+        }
         
         // Create exclusive publication for ingress
         std::int64_t pubId = m_aeron->addExclusivePublication("aeron:udp?endpoint=localhost:24325", 10);
         invoker.invoke();  // Process async operations
-        POLL_FOR_NON_NULL(m_ingressPublication, m_aeron->findExclusivePublication(pubId), invoker);
+        m_ingressPublication = m_aeron->findExclusivePublication(pubId);
+        
+        t0 = aeron_epoch_clock();
+        while (!m_ingressPublication)
+        {
+            invoker.invoke();
+            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
+            {
+                throw std::runtime_error("Timeout waiting for ingress publication");
+            }
+            std::this_thread::yield();
+            m_ingressPublication = m_aeron->findExclusivePublication(pubId);
+        }
         
         // Wait for publication to be connected
-        POLL_FOR(m_ingressPublication->isConnected(), invoker);
+        t0 = aeron_epoch_clock();
+        while (!m_ingressPublication->isConnected())
+        {
+            invoker.invoke();
+            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
+            {
+                throw std::runtime_error("Timeout waiting for ingress publication to connect");
+            }
+            std::this_thread::yield();
+        }
         
         // Get egress image (first available image from subscription)
         m_egressImage = nullptr;
@@ -146,9 +180,30 @@ public:
         // For testing, let's create a regular Publication
         std::int64_t pubId2 = m_aeron->addPublication("aeron:udp?endpoint=localhost:24325", 10);
         invoker.invoke();  // Process async operations
-        std::shared_ptr<Publication> publication;
-        POLL_FOR_NON_NULL(publication, m_aeron->findPublication(pubId2), invoker);
-        POLL_FOR(publication->isConnected(), invoker);
+        std::shared_ptr<Publication> publication = m_aeron->findPublication(pubId2);
+        
+        t0 = aeron_epoch_clock();
+        while (!publication)
+        {
+            invoker.invoke();
+            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
+            {
+                throw std::runtime_error("Timeout waiting for publication");
+            }
+            std::this_thread::yield();
+            publication = m_aeron->findPublication(pubId2);
+        }
+        
+        t0 = aeron_epoch_clock();
+        while (!publication->isConnected())
+        {
+            invoker.invoke();
+            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
+            {
+                throw std::runtime_error("Timeout waiting for publication to connect");
+            }
+            std::this_thread::yield();
+        }
         
         m_aeronCluster = std::shared_ptr<AeronCluster>(new AeronCluster(
             m_context,
