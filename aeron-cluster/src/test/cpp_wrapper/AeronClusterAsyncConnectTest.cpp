@@ -55,9 +55,9 @@ inline std::int64_t nanoClock() {
 class AeronClusterAsyncConnectTest : public testing::Test {
 public:
   AeronClusterAsyncConnectTest()
-      : m_driver(), m_aeron(Aeron::connect()),
-        m_context(std::make_shared<AeronCluster::Context>()) {
+      : m_driver(), m_context(std::make_shared<AeronCluster::Context>()) {
     m_driver.start();
+    m_aeron = Aeron::connect();
 
     m_context->aeron(m_aeron)
         .ownsAeronClient(false)

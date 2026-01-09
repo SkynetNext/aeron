@@ -25,6 +25,7 @@
 #include "Aeron.h"
 #include "Subscription.h"
 #include "concurrent/logbuffer/Header.h"
+#include "concurrent/logbuffer/DataFrameHeader.h"
 #include "concurrent/AtomicBuffer.h"
 #include "generated/aeron_cluster_codecs/MessageHeader.h"
 #include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
@@ -78,8 +79,19 @@ public:
 private:
     Header createTestHeader()
     {
+        // Allocate frame buffer (must be valid for aeron_header_values to work)
+        static std::vector<std::uint8_t> frameBuffer(256, 0);
+        auto *frame = reinterpret_cast<std::uint8_t *>(frameBuffer.data());
+        
+        // Initialize frame header fields
+        using namespace aeron::concurrent::logbuffer;
+        frame[DataFrameHeader::FRAME_LENGTH_FIELD_OFFSET] = 0;
+        frame[DataFrameHeader::VERSION_FIELD_OFFSET] = DataFrameHeader::CURRENT_VERSION;
+        frame[DataFrameHeader::FLAGS_FIELD_OFFSET] = 0;
+        frame[DataFrameHeader::TYPE_FIELD_OFFSET] = DataFrameHeader::HDR_TYPE_DATA;
+        
         auto *aeronHeader = new aeron_header_t{};
-        aeronHeader->frame = nullptr;
+        aeronHeader->frame = frame;
         aeronHeader->fragmented_frame_length = NULL_VALUE;
         aeronHeader->initial_term_id = 0;
         aeronHeader->position_bits_to_shift = 0;
