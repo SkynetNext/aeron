@@ -3241,6 +3241,11 @@ void aeron_driver_async_client_command_complete(
     void *task_clientd,
     void *executor_clientd)
 {
+    if (NULL == task_clientd || NULL == executor_clientd)
+    {
+        return;  // Defensive check: invalid parameters
+    }
+
     aeron_driver_async_client_command_t *async_client_command = task_clientd;
     aeron_driver_conductor_t *conductor = executor_clientd;
     int64_t correlation_id = (NULL != async_client_command->correlated) ?

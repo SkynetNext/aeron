@@ -306,15 +306,24 @@ int aeron_executor_process_completions(aeron_executor_t *executor, int limit)
 
 void aeron_executor_task_do_complete(aeron_executor_task_t *task)
 {
+    if (NULL == task)
+    {
+        return;  // Defensive check: invalid task
+    }
+
     // Shutdown tasks may have NULL on_complete callback
     if (NULL != task->on_complete)
     {
-        task->on_complete(
-            task->result,
-            task->errcode,
-            task->errmsg,
-            task->clientd,
-            task->executor->clientd);
+        // Defensive check: ensure executor is valid
+        if (NULL != task->executor)
+        {
+            task->on_complete(
+                task->result,
+                task->errcode,
+                task->errmsg,
+                task->clientd,
+                task->executor->clientd);
+        }
     }
 
     aeron_executor_task_release(task);
