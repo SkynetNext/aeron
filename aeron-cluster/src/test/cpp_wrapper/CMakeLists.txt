@@ -56,6 +56,21 @@ function(aeron_cluster_wrapper_test name file)
         ${CMAKE_THREAD_LIBS_INIT} 
         ${AERON_LIB_WINSOCK_LIBS})
     target_compile_definitions(${wrapper_name} PUBLIC "_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING")
+    
+    # Add debug symbols and sanitizers for better crash debugging
+    if (NOT "${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+        target_compile_options(${wrapper_name} PRIVATE
+            -g
+            -O0
+            -fno-omit-frame-pointer
+            -fno-inline
+        )
+        target_link_options(${wrapper_name} PRIVATE
+            -g
+            -fno-omit-frame-pointer
+        )
+    endif()
+    
     add_test(NAME ${wrapper_name} COMMAND ${wrapper_name})
 endfunction()
 

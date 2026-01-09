@@ -13,12 +13,20 @@ cd /data/aeron/build
 rm -f CMakeCache.txt
 
 # 3. 重新配置 CMake（让 CMake 捕获新的环境变量）
-cmake .. -DCMAKE_BUILD_TYPE=Release \
+# 使用 Debug 模式以便调试段错误（包含调试符号）
+cmake .. -DCMAKE_BUILD_TYPE=Debug \
          -DBUILD_AERON_CLUSTER_API=ON \
          -DAERON_TESTS=ON \
          -DAERON_UNIT_TESTS=ON
 
          make -j$(nproc)
+
+# 如果段错误，可以使用 gdb 调试：
+# gdb --args ./aeronClusterTestW
+# 或者直接运行并查看 core dump：
+# ulimit -c unlimited
+# ./aeronClusterTestW
+# gdb ./aeronClusterTestW core
 
 cd /data/aeron/build
 ctest -R egressPollerTestW -R aeronClusterContextTestW -R aeronClusterTestW -R egressAdapterTestW -R aeronClusterAsyncConnectTestW --output-on-failure
