@@ -223,6 +223,13 @@ public:
         {
             m_aeronCluster->close();
         }
+        // Close Aeron client before stopping driver to ensure all async operations complete
+        if (m_aeron)
+        {
+            m_aeron.reset();
+        }
+        // Give driver time to process any pending async operations
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         delete m_header.hdr();
         m_driver.stop();
     }
