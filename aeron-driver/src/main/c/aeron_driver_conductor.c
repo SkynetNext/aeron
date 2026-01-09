@@ -3243,7 +3243,8 @@ void aeron_driver_async_client_command_complete(
 {
     aeron_driver_async_client_command_t *async_client_command = task_clientd;
     aeron_driver_conductor_t *conductor = executor_clientd;
-    int64_t correlation_id = async_client_command->correlated->correlation_id;
+    int64_t correlation_id = (NULL != async_client_command->correlated) ?
+        async_client_command->correlated->correlation_id : 0;
 
     conductor->async_client_command_in_flight = false;
 
@@ -3295,6 +3296,7 @@ int aeron_driver_async_client_command_allocate(
 
     async_client_command->on_error = NULL;
     async_client_command->on_complete = NULL;  // Initialize to NULL, must be set before submit
+    async_client_command->correlated = NULL;  // Initialize to NULL, must be set before submit
     async_client_command->async_command.original_command =
         (void *)((const char *)async_client_command + AERON_PADDED_SIZEOF(aeron_driver_async_client_command_t));
 
