@@ -766,6 +766,7 @@ private:
     std::function<std::int64_t()> m_nanoClock;
     std::shared_ptr<void> m_idleStrategy;
     BufferClaim m_bufferClaim;
+    std::vector<std::uint8_t> m_headerBufferData;
     AtomicBuffer m_headerBuffer;
     MessageHeaderEncoder m_messageHeaderEncoder;
     SessionMessageHeaderEncoder m_sessionMessageHeaderEncoder;
@@ -1760,7 +1761,8 @@ inline AeronCluster::AeronCluster(
         return aeron::systemNanoClock(); 
     }),
     m_idleStrategy(ctx->m_idleStrategy),
-    m_headerBuffer(new std::uint8_t[SESSION_HEADER_LENGTH], SESSION_HEADER_LENGTH),
+    m_headerBufferData(SESSION_HEADER_LENGTH),
+    m_headerBuffer(m_headerBufferData.data(), SESSION_HEADER_LENGTH),
     m_messageHeaderEncoder(messageHeaderEncoder),
     m_fragmentAssembler([this](AtomicBuffer &buffer, util::index_t offset, util::index_t length, Header &header) {
         this->onFragment(buffer, offset, length, header);
