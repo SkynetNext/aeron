@@ -153,11 +153,11 @@ TEST_F(EgressPollerTestFixture, shouldHandleSessionMessage)
     SessionMessageHeader encoder;
     
     // Encode message header
-    messageHeader.wrap(reinterpret_cast<char *>(m_buffer.buffer()), offset, messageHeader.sbeSchemaVersion(), m_buffer.capacity());
+    messageHeader.wrap(reinterpret_cast<char *>(m_buffer.buffer()), offset, MessageHeader::sbeSchemaVersion(), m_buffer.capacity());
     messageHeader.blockLength(encoder.sbeBlockLength());
     messageHeader.templateId(encoder.sbeTemplateId());
-    messageHeader.schemaId(encoder.sbeSchemaId());
-    messageHeader.version(encoder.sbeSchemaVersion());
+    messageHeader.schemaId(MessageHeader::sbeSchemaId());
+    messageHeader.version(MessageHeader::sbeSchemaVersion());
     
     // Encode session message header
     encoder.wrapForEncode(reinterpret_cast<char *>(m_buffer.buffer()), offset + messageHeader.encodedLength(), m_buffer.capacity());
