@@ -213,14 +213,18 @@ int aeron_executor_close(aeron_executor_t *executor)
     aeron_linked_queue_node_t *node;
     bool shutdown = false;
 
-    // theoretically, if the executor was empty when _close was called, we should only go through this loop one time
+    // Process all tasks from return_queue until we find the shutdown task
+    // Since the executor thread has already joined, the shutdown task must be in the queue
     do
     {
-        // retrieve the node so that it can be deleted when the task is released
-        task = aeron_blocking_linked_queue_poll_ex(&executor->return_queue, &node);
+        // Use take_ex (blocking) to wait for the shutdown task if queue is empty
+        // This should not block indefinitely since executor thread has already joined
+        task = aeron_blocking_linked_queue_take_ex(&executor->return_queue, &node);
 
         if (NULL == task)
         {
+            // This should not happen if executor thread has properly joined
+            // but handle it gracefully
             continue;
         }
 
