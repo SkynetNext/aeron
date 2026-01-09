@@ -54,21 +54,33 @@ protected:
 
 TEST_F(AeronClusterContextTest, concludeThrowsConfigurationExceptionIfIngressChannelIsNotSet)
 {
-    m_context->ingressChannel("");
+    // Test with empty string
+    {
+        auto context = std::make_shared<AeronCluster::Context>();
+        context->aeron(m_aeron)
+               .ingressChannel("")
+               .egressChannel("aeron:udp?endpoint=localhost:0");
+        
+        EXPECT_THROW(
+            {
+                context->conclude();
+            },
+            ConfigurationException);
+    }
     
-    EXPECT_THROW(
-        {
-            m_context->conclude();
-        },
-        ConfigurationException);
-    
-    m_context->ingressChannel(std::string());
-    
-    EXPECT_THROW(
-        {
-            m_context->conclude();
-        },
-        ConfigurationException);
+    // Test with null/empty string (separate context to avoid ConcurrentConcludeException)
+    {
+        auto context = std::make_shared<AeronCluster::Context>();
+        context->aeron(m_aeron)
+               .ingressChannel(std::string())
+               .egressChannel("aeron:udp?endpoint=localhost:0");
+        
+        EXPECT_THROW(
+            {
+                context->conclude();
+            },
+            ConfigurationException);
+    }
 }
 
 TEST_F(AeronClusterContextTest, concludeThrowsConfigurationExceptionIfIngressChannelIsSetToIpcAndIngressEndpointsSpecified)
@@ -85,21 +97,33 @@ TEST_F(AeronClusterContextTest, concludeThrowsConfigurationExceptionIfIngressCha
 
 TEST_F(AeronClusterContextTest, concludeThrowsConfigurationExceptionIfEgressChannelIsNotSet)
 {
-    m_context->egressChannel("");
+    // Test with empty string
+    {
+        auto context = std::make_shared<AeronCluster::Context>();
+        context->aeron(m_aeron)
+               .ingressChannel("aeron:udp")
+               .egressChannel("");
+        
+        EXPECT_THROW(
+            {
+                context->conclude();
+            },
+            ConfigurationException);
+    }
     
-    EXPECT_THROW(
-        {
-            m_context->conclude();
-        },
-        ConfigurationException);
-    
-    m_context->egressChannel(std::string());
-    
-    EXPECT_THROW(
-        {
-            m_context->conclude();
-        },
-        ConfigurationException);
+    // Test with null/empty string (separate context to avoid ConcurrentConcludeException)
+    {
+        auto context = std::make_shared<AeronCluster::Context>();
+        context->aeron(m_aeron)
+               .ingressChannel("aeron:udp")
+               .egressChannel(std::string());
+        
+        EXPECT_THROW(
+            {
+                context->conclude();
+            },
+            ConfigurationException);
+    }
 }
 
 TEST_F(AeronClusterContextTest, clientNameShouldHandleEmptyValue)
