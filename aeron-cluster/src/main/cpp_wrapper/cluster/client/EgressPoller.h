@@ -265,17 +265,19 @@ public:
             return ControlledPollAction::ABORT;
         }
 
+        // Read schemaId directly from buffer (offset 4 in SBE MessageHeader)
+        // This avoids issues when wrap() uses wrong schemaVersion for different schemas
+        const std::uint16_t schemaId = buffer.getUInt16(offset + 4);
+        if (schemaId != MessageHeader::sbeSchemaId())
+        {
+            return ControlledPollAction::CONTINUE; // skip unknown schemas
+        }
+
         m_messageHeaderDecoder.wrap(
             reinterpret_cast<char *>(buffer.buffer()),
             offset,
             MessageHeader::sbeSchemaVersion(),
             buffer.capacity());
-
-        const std::uint16_t schemaId = m_messageHeaderDecoder.sbeSchemaId();
-        if (schemaId != MessageHeader::sbeSchemaId())
-        {
-            return ControlledPollAction::CONTINUE; // skip unknown schemas
-        }
 
         m_templateId = m_messageHeaderDecoder.templateId();
         switch (m_templateId)
