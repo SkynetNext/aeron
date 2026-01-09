@@ -1,0 +1,95 @@
+name: C++ Cluster Tests
+
+on:
+    workflow_dispatch:
+    push:
+        branches:
+            - master
+    pull_request:
+        branches:
+            - master
+
+concurrency:
+    group: cpp-cluster-tests-${{ github.ref }}
+    cancel-in-progress: true
+
+env:
+    JAVA_VERSION: "17"
+
+permissions:
+    contents: read
+
+jobs:
+    cpp-cluster-tests-linux:
+        name: C++ Cluster Tests (Linux)
+        runs-on: ubuntu-24.04
+        timeout-minutes: 30
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v5
+              with:
+                  ref: ${{ github.sha }}
+
+            - name: Setup java
+              uses: actions/setup-java@v5
+              with:
+                  distribution: "zulu"
+                  java-version: ${{ env.JAVA_VERSION }}
+
+            - name: Setup BUILD_JAVA_HOME & BUILD_JAVA_VERSION
+              run: |
+                  java -Xinternalversion
+                  echo "BUILD_JAVA_HOME=${JAVA_HOME}" >> $GITHUB_ENV
+                  echo "BUILD_JAVA_VERSION=${{ env.JAVA_VERSION }}" >> $GITHUB_ENV
+
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v5
+
+            - name: Setup small temp file system
+              run: |
+                  sudo mkdir -p /mnt/tmp_aeron_dir
+                  sudo mount -t tmpfs -o size=50M,mode=777 tmpfs /mnt/tmp_aeron_dir
+
+            - name: Enable core dumps
+              run: |
+                  ulimit -c unlimited
+                  sudo systemctl stop apport.service || true
+                  sudo systemctl disable apport.service || true
+                  sudo mkdir -p /var/coredump
+                  sudo chmod a+rw /var/coredump
+                  sudo sysctl -w kernel.core_pattern="/var/coredump/core_%e.%p"
+
+            - name: Build C++ with CMake
+              run: |
+                  mkdir -p build && cd build
+                  cmake .. \
+                    -DCMAKE_BUILD_TYPE=Debug \
+                    -DBUILD_AERON_CLUSTER_API=ON \
+                    -DAERON_TESTS=ON \
+                    -DAERON_UNIT_TESTS=ON
+                  make -j$(nproc)
+
+            - name: Run Cluster Tests
+              working-directory: build
+              run: |
+                  ctest -R "egressPollerTestW|aeronClusterContextTestW|aeronClusterTestW|egressAdapterTestW|aeronClusterAsyncConnectTestW" --output-on-failure
+
+            - name: Remove small temp file system
+              if: always()
+              run: |
+                  sudo umount /mnt/tmp_aeron_dir
+                  sudo rm -rf /mnt/tmp_aeron_dir
+
+            - name: Copy test logs
+              id: copy_test_logs
+              if: failure()
+              run: |
+                  echo "file=build/distributions/test_logs.tbz2" >> $GITHUB_OUTPUT
+                  ./gradlew tarTestLogs || true
+
+            - name: Upload crash logs
+              if: always() && steps.copy_test_logs.outputs.file == 'build/distributions/test_logs.tbz2'
+              uses: actions/upload-artifact@v5
+              with:
+                  name: crash-logs-cpp-cluster-tests
+                  path: ${{ steps.copy_test_logs.outputs.file }}

@@ -49,7 +49,7 @@ make -j$(nproc)
 
 ```bash
 cd /data/aeron/build
-ctest -R egressPollerTestW -R aeronClusterContextTestW -R aeronClusterTestW -R egressAdapterTestW -R aeronClusterAsyncConnectTestW --output-on-failure
+ctest -R "egressPollerTestW|aeronClusterContextTestW|aeronClusterTestW|egressAdapterTestW|aeronClusterAsyncConnectTestW" --output-on-failure
 ```
 
 ### 单独运行每个测试
