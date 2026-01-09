@@ -36,7 +36,7 @@
 #include "cluster/client/AeronCluster.h"
 #include "cluster/client/EgressListener.h"
 #include "concurrent/AtomicBuffer.h"
-#include "concurrent/BackOffIdleStrategy.h"
+#include "concurrent/NoOpIdleStrategy.h"
 #include "concurrent/logbuffer/DataFrameHeader.h"
 #include "concurrent/logbuffer/Header.h"
 #include "generated/aeron_cluster_codecs/MessageHeader.h"
@@ -100,7 +100,7 @@ public:
         .ownsAeronClient(false)
         .egressChannel("aeron:udp?endpoint=localhost:0")
         .ingressChannel("aeron:udp")
-        .idleStrategy(std::make_shared<BackoffIdleStrategy>())
+        .idleStrategy(std::make_shared<NoOpIdleStrategy>())
         .egressListener(m_egressListener)
         .newLeaderTimeoutNs(std::chrono::seconds(1).count());
 
