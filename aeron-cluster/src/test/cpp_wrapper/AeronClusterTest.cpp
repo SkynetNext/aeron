@@ -96,8 +96,13 @@ public:
         
         // Create Aeron context with custom nano clock
         Context ctx;
+        ctx.useConductorAgentInvoker(true);  // Enable agent invoker for async operations
         // Note: nanoClock is not directly settable in C++ Context, using systemNanoClock instead
         m_aeron = Aeron::connect(ctx);
+        
+        // Get agent invoker to process async operations
+        auto& invoker = m_aeron->conductorAgentInvoker();
+        invoker.start();
         
         // Create cluster context
         m_context = std::make_shared<AeronCluster::Context>();
@@ -113,20 +118,24 @@ public:
         
         // Create subscription for egress
         std::int64_t subId = m_aeron->addSubscription("aeron:udp?endpoint=localhost:24325", 10);
+        invoker.invoke();  // Process async operations
         m_egressSubscription = m_aeron->findSubscription(subId);
         
         while (!m_egressSubscription)
         {
+            invoker.invoke();  // Process async operations
             std::this_thread::yield();
             m_egressSubscription = m_aeron->findSubscription(subId);
         }
         
         // Create exclusive publication for ingress
         std::int64_t pubId = m_aeron->addExclusivePublication("aeron:udp?endpoint=localhost:24325", 10);
+        invoker.invoke();  // Process async operations
         m_ingressPublication = m_aeron->findExclusivePublication(pubId);
         
         while (!m_ingressPublication)
         {
+            invoker.invoke();  // Process async operations
             std::this_thread::yield();
             m_ingressPublication = m_aeron->findExclusivePublication(pubId);
         }
@@ -134,6 +143,7 @@ public:
         // Wait for publication to be connected
         while (!m_ingressPublication->isConnected())
         {
+            invoker.invoke();  // Process async operations
             std::this_thread::yield();
         }
         
@@ -152,16 +162,19 @@ public:
         // But we have ExclusivePublication. We need to create a Publication instead
         // For testing, let's create a regular Publication
         std::int64_t pubId2 = m_aeron->addPublication("aeron:udp?endpoint=localhost:24325", 10);
+        invoker.invoke();  // Process async operations
         std::shared_ptr<Publication> publication = m_aeron->findPublication(pubId2);
         
         while (!publication)
         {
+            invoker.invoke();  // Process async operations
             std::this_thread::yield();
             publication = m_aeron->findPublication(pubId2);
         }
         
         while (!publication->isConnected())
         {
+            invoker.invoke();  // Process async operations
             std::this_thread::yield();
         }
         
