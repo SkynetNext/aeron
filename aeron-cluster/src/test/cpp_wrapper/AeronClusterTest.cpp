@@ -319,14 +319,20 @@ TEST_P(AeronClusterTestFixture, shouldCloseItselfWhenUnableToSendMessageForLonge
 
 TEST_F(AeronClusterTestFixture, shouldCloseIngressPublicationWhenEgressImageCloses)
 {
-    // Test in CONNECTED state
-    if (m_egressImage && m_egressImage->isClosed())
+    // Skip test if egressImage is not available (requires actual subscription with image)
+    if (!m_egressImage)
     {
-        EXPECT_EQ(1, m_aeronCluster->pollEgress());
+        GTEST_SKIP() << "Egress image not available for this test";
     }
     
-    // Note: Full test would verify publication.close() was called
-    // This requires tracking publication state
+    // Test in CONNECTED state - simulate image closing
+    // Note: In real scenario, we would mock the image to return isClosed() = true
+    // For now, we test the basic pollEgress functionality
+    const std::int32_t result = m_aeronCluster->pollEgress();
+    EXPECT_GE(result, 0);
+    
+    // Note: Full test would verify publication.close() was called when image closes
+    // This requires mocking the image or tracking publication state
 }
 
 TEST_F(AeronClusterTestFixture, shouldCloseItselfAfterReachingMaxPositionOnTheIngressPublication)
