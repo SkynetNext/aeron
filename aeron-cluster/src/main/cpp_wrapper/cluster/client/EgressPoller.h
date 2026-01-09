@@ -274,10 +274,12 @@ public:
             MessageHeader::sbeSchemaVersion(),
             buffer.capacity());
 
-        const std::uint16_t schemaId = m_messageHeaderDecoder.sbeSchemaId();
-        if (schemaId != MessageHeader::sbeSchemaId())
+        const std::uint16_t schemaId = m_messageHeaderDecoder.schemaId();
+        const std::uint16_t expectedSchemaId = MessageHeader::sbeSchemaId();
+        if (schemaId != expectedSchemaId)
         {
-            return ControlledPollAction::CONTINUE; // skip unknown schemas
+            // Unknown schema - skip it and continue polling
+            return ControlledPollAction::CONTINUE;
         }
 
         m_templateId = m_messageHeaderDecoder.templateId();
