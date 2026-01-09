@@ -1164,9 +1164,9 @@ inline void AeronCluster::Context::close()
 // MemberIngress implementation
 inline AeronCluster::MemberIngress::MemberIngress(
     std::shared_ptr<Context> ctx, int memberId, const std::string& endpoint) :
-    m_ctx(ctx),
     m_memberId(memberId),
-    m_endpoint(endpoint)
+    m_endpoint(endpoint),
+    m_ctx(ctx)
 {
 }
 

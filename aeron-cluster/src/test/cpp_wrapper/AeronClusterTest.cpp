@@ -74,12 +74,19 @@ class AeronClusterTestFixture : public testing::TestWithParam<std::tuple<bool, b
 {
 public:
     AeronClusterTestFixture() :
+        m_driver(),
+        m_aeron(),
+        m_context(),
+        m_egressListener(std::make_shared<MockEgressListener>()),
+        m_ingressPublication(),
+        m_egressSubscription(),
+        m_egressImage(),
+        m_aeronCluster(),
         m_bufferData(1024, 0),
         m_buffer(m_bufferData.data(), static_cast<util::index_t>(m_bufferData.size())),
         m_appMessageData(8, 0),
         m_appMessage(m_appMessageData.data(), static_cast<util::index_t>(m_appMessageData.size())),
         m_header(createTestHeader()),
-        m_egressListener(std::make_shared<MockEgressListener>()),
         m_nanoTime(0),
         m_leadershipTermId(2),
         m_leaderMemberId(1),
