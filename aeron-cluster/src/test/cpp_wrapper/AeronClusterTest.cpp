@@ -28,6 +28,7 @@
 #include "Publication.h"
 #include "Subscription.h"
 #include "Image.h"
+#include "TestUtil.h"
 #include "concurrent/logbuffer/Header.h"
 #include "concurrent/logbuffer/DataFrameHeader.h"
 #include "concurrent/logbuffer/BufferClaim.h"
@@ -119,33 +120,15 @@ public:
         // Create subscription for egress
         std::int64_t subId = m_aeron->addSubscription("aeron:udp?endpoint=localhost:24325", 10);
         invoker.invoke();  // Process async operations
-        m_egressSubscription = m_aeron->findSubscription(subId);
-        
-        while (!m_egressSubscription)
-        {
-            invoker.invoke();  // Process async operations
-            std::this_thread::yield();
-            m_egressSubscription = m_aeron->findSubscription(subId);
-        }
+        POLL_FOR_NON_NULL(m_egressSubscription, m_aeron->findSubscription(subId), invoker);
         
         // Create exclusive publication for ingress
         std::int64_t pubId = m_aeron->addExclusivePublication("aeron:udp?endpoint=localhost:24325", 10);
         invoker.invoke();  // Process async operations
-        m_ingressPublication = m_aeron->findExclusivePublication(pubId);
-        
-        while (!m_ingressPublication)
-        {
-            invoker.invoke();  // Process async operations
-            std::this_thread::yield();
-            m_ingressPublication = m_aeron->findExclusivePublication(pubId);
-        }
+        POLL_FOR_NON_NULL(m_ingressPublication, m_aeron->findExclusivePublication(pubId), invoker);
         
         // Wait for publication to be connected
-        while (!m_ingressPublication->isConnected())
-        {
-            invoker.invoke();  // Process async operations
-            std::this_thread::yield();
-        }
+        POLL_FOR(m_ingressPublication->isConnected(), invoker);
         
         // Get egress image (first available image from subscription)
         m_egressImage = nullptr;
@@ -163,20 +146,9 @@ public:
         // For testing, let's create a regular Publication
         std::int64_t pubId2 = m_aeron->addPublication("aeron:udp?endpoint=localhost:24325", 10);
         invoker.invoke();  // Process async operations
-        std::shared_ptr<Publication> publication = m_aeron->findPublication(pubId2);
-        
-        while (!publication)
-        {
-            invoker.invoke();  // Process async operations
-            std::this_thread::yield();
-            publication = m_aeron->findPublication(pubId2);
-        }
-        
-        while (!publication->isConnected())
-        {
-            invoker.invoke();  // Process async operations
-            std::this_thread::yield();
-        }
+        std::shared_ptr<Publication> publication;
+        POLL_FOR_NON_NULL(publication, m_aeron->findPublication(pubId2), invoker);
+        POLL_FOR(publication->isConnected(), invoker);
         
         m_aeronCluster = std::shared_ptr<AeronCluster>(new AeronCluster(
             m_context,
