@@ -3266,10 +3266,13 @@ void aeron_driver_async_client_command_complete(
             }
         }
     }
-    else if (async_client_command->on_complete(
-        conductor, &async_client_command->async_command, async_client_command->on_execute_clientd) < 0)
+    else if (NULL != async_client_command->on_complete)
     {
-        aeron_driver_conductor_on_error(conductor, aeron_errcode(), aeron_errmsg(), correlation_id);
+        if (async_client_command->on_complete(
+            conductor, &async_client_command->async_command, async_client_command->on_execute_clientd) < 0)
+        {
+            aeron_driver_conductor_on_error(conductor, aeron_errcode(), aeron_errmsg(), correlation_id);
+        }
     }
 
     aeron_free(async_client_command);
@@ -3291,6 +3294,7 @@ int aeron_driver_async_client_command_allocate(
     }
 
     async_client_command->on_error = NULL;
+    async_client_command->on_complete = NULL;  // Initialize to NULL, must be set before submit
     async_client_command->async_command.original_command =
         (void *)((const char *)async_client_command + AERON_PADDED_SIZEOF(aeron_driver_async_client_command_t));
 
