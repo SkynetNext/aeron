@@ -77,8 +77,9 @@ class AeronClusterAsyncConnectTest : public testing::Test {
 public:
   AeronClusterAsyncConnectTest()
       : m_context(std::make_shared<AeronCluster::Context>()) {
-    // Java version uses mock Aeron - we'll use a real EmbeddedMediaDriver
-    // but configure it to match Java test behavior
+    // Use real EmbeddedMediaDriver like other C++ tests
+    // (AeronClusterContextTest, EgressAdapterTest) Java version uses mock, but
+    // C++ version uses real driver for integration testing
     m_driver.start();
     m_aeron = Aeron::connect();
 
@@ -90,7 +91,10 @@ public:
         .ingressStreamId(-19)
         .idleStrategy(std::make_shared<NoOpIdleStrategy>());
 
-    m_context->conclude();
+    // Note: Java version doesn't call conclude() in constructor
+    // It's called by asyncConnect() which calls ctx->conclude()
+    // For C++ version, we also don't call conclude() here to match Java
+    // behavior
   }
 
   ~AeronClusterAsyncConnectTest() override {
