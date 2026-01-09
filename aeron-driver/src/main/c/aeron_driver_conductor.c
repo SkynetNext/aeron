@@ -3835,6 +3835,12 @@ static void aeron_driver_conductor_on_rb_command_queue(
 int aeron_driver_conductor_do_work(void *clientd)
 {
     aeron_driver_conductor_t *conductor = (aeron_driver_conductor_t *)clientd;
+    // Defensive check: ensure nano_clock is set (should never be NULL after proper initialization)
+    if (NULL == conductor->context || NULL == conductor->context->nano_clock)
+    {
+        AERON_SET_ERR(EINVAL, "%s", "conductor context or nano_clock is NULL");
+        return -1;
+    }
     const int64_t now_ns = conductor->context->nano_clock();
     aeron_driver_conductor_track_time(conductor, now_ns);
     const int64_t now_ms = aeron_clock_cached_epoch_time(conductor->context->cached_clock);
