@@ -100,14 +100,16 @@ static void *aeron_executor_dispatch(void *arg)
             aeron_err_clear();
         }
 
-        if (shutdown)
+        if (USE_RETURN_QUEUE(executor))
         {
-            // Shutdown tasks should be released immediately, not queued
-            aeron_executor_task_release(task);
-        }
-        else if (USE_RETURN_QUEUE(executor))
-        {
+            // When using return queue, all tasks (including shutdown) must be queued
+            // so that aeron_executor_close can wait for the shutdown task
             aeron_blocking_linked_queue_offer_ex(&executor->return_queue, task, node);
+        }
+        else if (shutdown)
+        {
+            // When not using return queue, shutdown tasks should be released immediately
+            aeron_executor_task_release(task);
         }
         else
         {
@@ -300,12 +302,16 @@ int aeron_executor_process_completions(aeron_executor_t *executor, int limit)
 
 void aeron_executor_task_do_complete(aeron_executor_task_t *task)
 {
-    task->on_complete(
-        task->result,
-        task->errcode,
-        task->errmsg,
-        task->clientd,
-        task->executor->clientd);
+    // Shutdown tasks may have NULL on_complete callback
+    if (NULL != task->on_complete)
+    {
+        task->on_complete(
+            task->result,
+            task->errcode,
+            task->errmsg,
+            task->clientd,
+            task->executor->clientd);
+    }
 
     aeron_executor_task_release(task);
 }
