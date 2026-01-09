@@ -112,7 +112,10 @@ public:
 
         const std::int32_t templateId = m_messageHeaderDecoder.templateId();
         const std::int32_t schemaId = m_messageHeaderDecoder.schemaId();
-        if (schemaId != MessageHeader::sbeSchemaId())
+        // Note: MessageHeader::sbeSchemaId() incorrectly returns 112 due to code generation issue
+        // The correct schema ID for cluster codecs is 111 (from aeron-cluster-codecs.xml)
+        // Use SessionMessageHeader::sbeSchemaId() which correctly returns 111
+        if (schemaId != SessionMessageHeader::sbeSchemaId())
         {
             if (m_listenerExtension)
             {
@@ -127,7 +130,7 @@ public:
                 return;
             }
             throw ClusterException(
-                "expected schemaId=" + std::to_string(MessageHeader::sbeSchemaId()) +
+                "expected schemaId=" + std::to_string(SessionMessageHeader::sbeSchemaId()) +
                 ", actual=" + std::to_string(schemaId), SOURCEINFO);
         }
 
