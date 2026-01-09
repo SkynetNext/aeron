@@ -287,12 +287,12 @@ public:
         {
             case SessionMessageHeader::SBE_TEMPLATE_ID:
             {
-                m_sessionMessageHeaderDecoder = SessionMessageHeader(
+                m_sessionMessageHeaderDecoder.wrapForDecode(
                     reinterpret_cast<char *>(buffer.buffer()),
                     offset + MessageHeader::encodedLength(),
-                    buffer.capacity(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.actingVersion());
+                    m_messageHeaderDecoder.version(),
+                    buffer.capacity());
 
                 m_leadershipTermId = m_sessionMessageHeaderDecoder.leadershipTermId();
                 m_clusterSessionId = m_sessionMessageHeaderDecoder.clusterSessionId();
@@ -302,12 +302,12 @@ public:
 
             case SessionEvent::SBE_TEMPLATE_ID:
             {
-                m_sessionEventDecoder = SessionEvent(
+                m_sessionEventDecoder.wrapForDecode(
                     reinterpret_cast<char *>(buffer.buffer()),
                     offset + MessageHeader::encodedLength(),
-                    buffer.capacity(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.actingVersion());
+                    m_messageHeaderDecoder.version(),
+                    buffer.capacity());
 
                 m_clusterSessionId = m_sessionEventDecoder.clusterSessionId();
                 m_correlationId = m_sessionEventDecoder.correlationId();
@@ -324,12 +324,12 @@ public:
 
             case NewLeaderEvent::SBE_TEMPLATE_ID:
             {
-                m_newLeaderEventDecoder = NewLeaderEvent(
+                m_newLeaderEventDecoder.wrapForDecode(
                     reinterpret_cast<char *>(buffer.buffer()),
                     offset + MessageHeader::encodedLength(),
-                    buffer.capacity(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.actingVersion());
+                    m_messageHeaderDecoder.version(),
+                    buffer.capacity());
 
                 m_clusterSessionId = m_newLeaderEventDecoder.clusterSessionId();
                 m_leadershipTermId = m_newLeaderEventDecoder.leadershipTermId();
@@ -342,12 +342,12 @@ public:
 
             case Challenge::SBE_TEMPLATE_ID:
             {
-                m_challengeDecoder = Challenge(
+                m_challengeDecoder.wrapForDecode(
                     reinterpret_cast<char *>(buffer.buffer()),
                     offset + MessageHeader::encodedLength(),
-                    buffer.capacity(),
                     m_messageHeaderDecoder.blockLength(),
-                    m_messageHeaderDecoder.actingVersion());
+                    m_messageHeaderDecoder.version(),
+                    buffer.capacity());
 
                 const std::uint32_t encodedChallengeLength = m_challengeDecoder.encodedChallengeLength();
                 m_encodedChallenge.resize(encodedChallengeLength == 0 ? 0 : encodedChallengeLength);

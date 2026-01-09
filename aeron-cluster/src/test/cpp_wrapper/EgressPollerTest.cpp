@@ -144,9 +144,6 @@ TEST_F(EgressPollerTestFixture, shouldIgnoreUnknownMessageSchema)
 
 TEST_F(EgressPollerTestFixture, shouldHandleSessionMessage)
 {
-    // Reset poller state (in case it was set by previous test)
-    m_egressPoller->poll();
-    
     const std::int32_t offset = 16;
     const std::int64_t clusterSessionId = 7777;
     const std::int64_t leadershipTermId = 5;
