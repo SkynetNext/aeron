@@ -195,7 +195,7 @@ private:
         frame[DataFrameHeader::TYPE_FIELD_OFFSET] = DataFrameHeader::HDR_TYPE_DATA;
         
         auto *aeronHeader = new aeron_header_t{};
-        aeronHeader->frame = frame;
+        aeronHeader->frame = reinterpret_cast<aeron_data_header_t *>(frame);
         aeronHeader->fragmented_frame_length = NULL_VALUE;
         aeronHeader->initial_term_id = 0;
         aeronHeader->position_bits_to_shift = 0;
