@@ -265,20 +265,20 @@ public:
             return ControlledPollAction::ABORT;
         }
 
-        // Read schemaId directly from buffer (offset 4 in SBE MessageHeader) to check first
-        // This avoids issues when wrap() uses wrong schemaVersion for different schemas
-        const std::uint16_t schemaId = buffer.getUInt16(offset + 4);
-        if (schemaId != MessageHeader::sbeSchemaId())
-        {
-            return ControlledPollAction::CONTINUE; // skip unknown schemas
-        }
-
-        // Now that we know schemaId matches, use cluster's schemaVersion for wrap()
+        // Wrap first using cluster's schemaVersion (matches Java behavior)
+        // Even if buffer contains archive message, we can still read schemaId correctly
+        // because SBE MessageHeader structure is fixed (schemaId at offset 4)
         m_messageHeaderDecoder.wrap(
             reinterpret_cast<char *>(buffer.buffer()),
             offset,
             MessageHeader::sbeSchemaVersion(),
             buffer.capacity());
+
+        const std::uint16_t schemaId = m_messageHeaderDecoder.sbeSchemaId();
+        if (schemaId != MessageHeader::sbeSchemaId())
+        {
+            return ControlledPollAction::CONTINUE; // skip unknown schemas
+        }
 
         m_templateId = m_messageHeaderDecoder.templateId();
         switch (m_templateId)
