@@ -14,33 +14,34 @@
  * limitations under the License.
  */
 
-#include <gtest/gtest.h>
-#include <gmock/gmock.h>
 #include <chrono>
-#include <unordered_map>
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include <thread>
+#include <unordered_map>
 
-#include "EmbeddedMediaDriver.h"
-#include "cluster/client/AeronCluster.h"
-#include "cluster/client/EgressListener.h"
+
 #include "Aeron.h"
+#include "EmbeddedMediaDriver.h"
 #include "ExclusivePublication.h"
+#include "Image.h"
 #include "Publication.h"
 #include "Subscription.h"
-#include "Image.h"
 #include "TestUtil.h"
 #include "aeronc.h"
-#include "concurrent/logbuffer/Header.h"
-#include "concurrent/logbuffer/DataFrameHeader.h"
-#include "concurrent/logbuffer/BufferClaim.h"
+#include "cluster/client/AeronCluster.h"
+#include "cluster/client/EgressListener.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/BackOffIdleStrategy.h"
+#include "concurrent/logbuffer/BufferClaim.h"
+#include "concurrent/logbuffer/DataFrameHeader.h"
+#include "concurrent/logbuffer/Header.h"
 #include "generated/aeron_cluster_codecs/MessageHeader.h"
 #include "generated/aeron_cluster_codecs/NewLeaderEvent.h"
 #include "util/BitUtil.h"
 
-extern "C"
-{
+
+extern "C" {
 #include "aeron_image.h"
 }
 
@@ -54,354 +55,349 @@ static const std::string INGRESS_ENDPOINTS = "foo:1000,bar:1000,baz:1000";
 static const std::int64_t CLUSTER_SESSION_ID = 123;
 
 // Mock EgressListener
-class MockEgressListener : public EgressListener
-{
+class MockEgressListener : public EgressListener {
 public:
-    MOCK_METHOD(void, onMessage, (
-        std::int64_t clusterSessionId,
-        std::int64_t timestamp,
-        AtomicBuffer& buffer,
-        util::index_t offset,
-        util::index_t length,
-        Header& header), (override));
+  MOCK_METHOD(void, onMessage,
+              (std::int64_t clusterSessionId, std::int64_t timestamp,
+               AtomicBuffer &buffer, util::index_t offset, util::index_t length,
+               Header &header),
+              (override));
 
-    MOCK_METHOD(void, onNewLeader, (
-        std::int64_t clusterSessionId,
-        std::int64_t leadershipTermId,
-        std::int32_t leaderMemberId,
-        const std::string& ingressEndpoints), (override));
+  MOCK_METHOD(void, onNewLeader,
+              (std::int64_t clusterSessionId, std::int64_t leadershipTermId,
+               std::int32_t leaderMemberId,
+               const std::string &ingressEndpoints),
+              (override));
 };
 
-class AeronClusterTestFixture : public testing::TestWithParam<std::tuple<bool, bool>>
-{
+class AeronClusterTestFixture
+    : public testing::TestWithParam<std::tuple<bool, bool>> {
 public:
-    AeronClusterTestFixture() :
-        m_driver(),
-        m_aeron(),
-        m_context(),
-        m_egressListener(std::make_shared<MockEgressListener>()),
-        m_ingressPublication(),
-        m_egressSubscription(),
-        m_egressImage(),
-        m_aeronCluster(),
-        m_bufferData(1024, 0),
-        m_buffer(m_bufferData.data(), static_cast<util::index_t>(m_bufferData.size())),
+  AeronClusterTestFixture()
+      : // 初始化列表顺序必须和成员声明顺序一致
+        m_nanoTime(0), m_leadershipTermId(2), m_leaderMemberId(1),
+        m_newLeaderEventPending(false), m_bufferData(1024, 0),
         m_appMessageData(8, 0),
-        m_appMessage(m_appMessageData.data(), static_cast<util::index_t>(m_appMessageData.size())),
-        m_header(createTestHeader()),
-        m_nanoTime(0),
-        m_leadershipTermId(2),
-        m_leaderMemberId(1),
-        m_newLeaderEventPending(false)
-    {
-        m_driver.start();
-        
-        // Create Aeron context with custom nano clock
-        Context ctx;
-        ctx.useConductorAgentInvoker(true);  // Enable agent invoker for async operations
-        // Note: nanoClock is not directly settable in C++ Context, using systemNanoClock instead
-        m_aeron = Aeron::connect(ctx);
-        
-        // Get agent invoker to process async operations
-        auto& invoker = m_aeron->conductorAgentInvoker();
-        invoker.start();
-        
-        // Create cluster context
-        m_context = std::make_shared<AeronCluster::Context>();
-        m_context->aeron(m_aeron)
-                 .ownsAeronClient(false)
-                 .egressChannel("aeron:udp?endpoint=localhost:0")
-                 .ingressChannel("aeron:udp")
-                 .idleStrategy(std::make_shared<BackoffIdleStrategy>())
-                 .egressListener(m_egressListener)
-                 .newLeaderTimeoutNs(std::chrono::seconds(1).count());
-        
-        m_context->conclude();
-        
-        // Create subscription for egress
-        std::int64_t subId = m_aeron->addSubscription("aeron:udp?endpoint=localhost:24325", 10);
-        invoker.invoke();  // Process async operations
-        m_egressSubscription = m_aeron->findSubscription(subId);
-        
-        std::int64_t t0 = aeron_epoch_clock();
-        while (!m_egressSubscription)
-        {
-            invoker.invoke();
-            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
-            {
-                throw std::runtime_error("Timeout waiting for egress subscription");
-            }
-            std::this_thread::yield();
-            m_egressSubscription = m_aeron->findSubscription(subId);
-        }
-        
-        // Create exclusive publication for ingress
-        std::int64_t pubId = m_aeron->addExclusivePublication("aeron:udp?endpoint=localhost:24325", 10);
-        invoker.invoke();  // Process async operations
-        m_ingressPublication = m_aeron->findExclusivePublication(pubId);
-        
-        t0 = aeron_epoch_clock();
-        while (!m_ingressPublication)
-        {
-            invoker.invoke();
-            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
-            {
-                throw std::runtime_error("Timeout waiting for ingress publication");
-            }
-            std::this_thread::yield();
-            m_ingressPublication = m_aeron->findExclusivePublication(pubId);
-        }
-        
-        // Wait for publication to be connected
-        t0 = aeron_epoch_clock();
-        while (!m_ingressPublication->isConnected())
-        {
-            invoker.invoke();
-            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
-            {
-                throw std::runtime_error("Timeout waiting for ingress publication to connect");
-            }
-            std::this_thread::yield();
-        }
-        
-        // Get egress image (first available image from subscription)
-        m_egressImage = nullptr;
-        if (m_egressSubscription->imageCount() > 0)
-        {
-            m_egressImage = m_egressSubscription->imageByIndex(0);
-        }
-        
-        // Create AeronCluster instance using private constructor (friend class)
-        MessageHeaderEncoder messageHeaderEncoder;
-        std::unordered_map<int, std::unique_ptr<AeronCluster::MemberIngress>> endpointByIdMap;
-        
-        // Note: AeronCluster constructor expects std::shared_ptr<Publication>
-        // But we have ExclusivePublication. We need to create a Publication instead
-        // For testing, let's create a regular Publication
-        std::int64_t pubId2 = m_aeron->addPublication("aeron:udp?endpoint=localhost:24325", 10);
-        invoker.invoke();  // Process async operations
-        std::shared_ptr<Publication> publication = m_aeron->findPublication(pubId2);
-        
-        t0 = aeron_epoch_clock();
-        while (!publication)
-        {
-            invoker.invoke();
-            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
-            {
-                throw std::runtime_error("Timeout waiting for publication");
-            }
-            std::this_thread::yield();
-            publication = m_aeron->findPublication(pubId2);
-        }
-        
-        t0 = aeron_epoch_clock();
-        while (!publication->isConnected())
-        {
-            invoker.invoke();
-            if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT)
-            {
-                throw std::runtime_error("Timeout waiting for publication to connect");
-            }
-            std::this_thread::yield();
-        }
-        
-        m_aeronCluster = std::shared_ptr<AeronCluster>(new AeronCluster(
-            m_context,
-            messageHeaderEncoder,
-            publication,
-            m_egressSubscription,
-            m_egressImage,
-            std::move(endpointByIdMap),
-            CLUSTER_SESSION_ID,
-            m_leadershipTermId,
-            m_leaderMemberId));
+        m_buffer(m_bufferData.data(),
+                 static_cast<util::index_t>(m_bufferData.size())),
+        m_appMessage(m_appMessageData.data(),
+                     static_cast<util::index_t>(m_appMessageData.size())),
+        m_header(createTestHeader()), m_driver(),
+        m_egressListener(std::make_shared<MockEgressListener>()), m_aeron(),
+        m_context(), m_ingressPublication(), m_egressSubscription(),
+        m_egressImage(), m_aeronCluster() {
+    // Driver启动必须在所有依赖它的对象初始化之后
+    m_driver.start();
+
+    // Create Aeron context with custom nano clock
+    Context ctx;
+    ctx.useConductorAgentInvoker(
+        true); // Enable agent invoker for async operations
+    // Note: nanoClock is not directly settable in C++ Context, using
+    // systemNanoClock instead
+    m_aeron = Aeron::connect(ctx);
+
+    // Get agent invoker to process async operations
+    auto &invoker = m_aeron->conductorAgentInvoker();
+    invoker.start();
+
+    // Create cluster context
+    m_context = std::make_shared<AeronCluster::Context>();
+    m_context->aeron(m_aeron)
+        .ownsAeronClient(false)
+        .egressChannel("aeron:udp?endpoint=localhost:0")
+        .ingressChannel("aeron:udp")
+        .idleStrategy(std::make_shared<BackoffIdleStrategy>())
+        .egressListener(m_egressListener)
+        .newLeaderTimeoutNs(std::chrono::seconds(1).count());
+
+    m_context->conclude();
+
+    // Create subscription for egress
+    std::int64_t subId =
+        m_aeron->addSubscription("aeron:udp?endpoint=localhost:24325", 10);
+    invoker.invoke(); // Process async operations
+    m_egressSubscription = m_aeron->findSubscription(subId);
+
+    std::int64_t t0 = aeron_epoch_clock();
+    while (!m_egressSubscription) {
+      invoker.invoke();
+      if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT) {
+        throw std::runtime_error("Timeout waiting for egress subscription");
+      }
+      std::this_thread::yield();
+      m_egressSubscription = m_aeron->findSubscription(subId);
     }
 
-    ~AeronClusterTestFixture() override
-    {
-        if (m_aeronCluster)
-        {
-            m_aeronCluster->close();
-        }
-        // Close Aeron client before stopping driver to ensure all async operations complete
-        if (m_aeron)
-        {
-            m_aeron.reset();
-        }
-        // Give driver time to process any pending async operations
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        delete m_header.hdr();
-        m_driver.stop();
+    // Create exclusive publication for ingress
+    std::int64_t pubId = m_aeron->addExclusivePublication(
+        "aeron:udp?endpoint=localhost:24325", 10);
+    invoker.invoke(); // Process async operations
+    m_ingressPublication = m_aeron->findExclusivePublication(pubId);
+
+    t0 = aeron_epoch_clock();
+    while (!m_ingressPublication) {
+      invoker.invoke();
+      if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT) {
+        throw std::runtime_error("Timeout waiting for ingress publication");
+      }
+      std::this_thread::yield();
+      m_ingressPublication = m_aeron->findExclusivePublication(pubId);
     }
+
+    // Wait for publication to be connected
+    t0 = aeron_epoch_clock();
+    while (!m_ingressPublication->isConnected()) {
+      invoker.invoke();
+      if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT) {
+        throw std::runtime_error(
+            "Timeout waiting for ingress publication to connect");
+      }
+      std::this_thread::yield();
+    }
+
+    // Get egress image (first available image from subscription)
+    m_egressImage = nullptr;
+    if (m_egressSubscription->imageCount() > 0) {
+      m_egressImage = m_egressSubscription->imageByIndex(0);
+    }
+
+    // Create AeronCluster instance using private constructor (friend class)
+    MessageHeaderEncoder messageHeaderEncoder;
+    std::unordered_map<int, std::unique_ptr<AeronCluster::MemberIngress>>
+        endpointByIdMap;
+
+    // Note: AeronCluster constructor expects std::shared_ptr<Publication>
+    // But we have ExclusivePublication. We need to create a Publication instead
+    // For testing, let's create a regular Publication
+    std::int64_t pubId2 =
+        m_aeron->addPublication("aeron:udp?endpoint=localhost:24325", 10);
+    invoker.invoke(); // Process async operations
+    std::shared_ptr<Publication> publication = m_aeron->findPublication(pubId2);
+
+    t0 = aeron_epoch_clock();
+    while (!publication) {
+      invoker.invoke();
+      if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT) {
+        throw std::runtime_error("Timeout waiting for publication");
+      }
+      std::this_thread::yield();
+      publication = m_aeron->findPublication(pubId2);
+    }
+
+    t0 = aeron_epoch_clock();
+    while (!publication->isConnected()) {
+      invoker.invoke();
+      if (aeron_epoch_clock() - t0 >= AERON_TEST_TIMEOUT) {
+        throw std::runtime_error("Timeout waiting for publication to connect");
+      }
+      std::this_thread::yield();
+    }
+
+    m_aeronCluster = std::shared_ptr<AeronCluster>(new AeronCluster(
+        m_context, messageHeaderEncoder, publication, m_egressSubscription,
+        m_egressImage, std::move(endpointByIdMap), CLUSTER_SESSION_ID,
+        m_leadershipTermId, m_leaderMemberId));
+  }
+
+  ~AeronClusterTestFixture() override {
+    // 清理顺序：从最高层到最底层（与Java try-with-resources顺序一致）
+    // 1. 先关闭cluster
+    if (m_aeronCluster) {
+      m_aeronCluster->close();
+      m_aeronCluster.reset();
+    }
+
+    // 2. 关闭publications和subscriptions
+    if (m_ingressPublication) {
+      m_ingressPublication.reset();
+    }
+    if (m_egressSubscription) {
+      m_egressSubscription.reset();
+    }
+
+    // 3. 关闭Aeron client（在driver之前）
+    if (m_aeron) {
+      m_aeron.reset();
+    }
+
+    // 4. 给driver时间处理异步操作
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    // 5. 清理header资源
+    if (m_header.hdr() != nullptr) {
+      delete m_header.hdr();
+    }
+
+    // 6. 最后停止driver（driver是最底层，最后关闭）
+    m_driver.stop();
+  }
 
 private:
-    Header createTestHeader()
-    {
-        // Allocate frame buffer (must be valid for aeron_header_values to work)
-        static std::vector<std::uint8_t> frameBuffer(256, 0);
-        auto *frame = reinterpret_cast<std::uint8_t *>(frameBuffer.data());
-        
-        // Initialize frame header fields
-        using namespace aeron::concurrent::logbuffer;
-        frame[DataFrameHeader::FRAME_LENGTH_FIELD_OFFSET] = 0;
-        frame[DataFrameHeader::VERSION_FIELD_OFFSET] = DataFrameHeader::CURRENT_VERSION;
-        frame[DataFrameHeader::FLAGS_FIELD_OFFSET] = 0;
-        frame[DataFrameHeader::TYPE_FIELD_OFFSET] = DataFrameHeader::HDR_TYPE_DATA;
-        
-        auto *aeronHeader = new aeron_header_t{};
-        aeronHeader->frame = reinterpret_cast<aeron_data_header_t *>(frame);
-        aeronHeader->fragmented_frame_length = NULL_VALUE;
-        aeronHeader->initial_term_id = 0;
-        aeronHeader->position_bits_to_shift = 0;
-        aeronHeader->context = nullptr;
-        return Header(aeronHeader);
-    }
+  Header createTestHeader() {
+    // Allocate frame buffer (must be valid for aeron_header_values to work)
+    static std::vector<std::uint8_t> frameBuffer(256, 0);
+    auto *frame = reinterpret_cast<std::uint8_t *>(frameBuffer.data());
+
+    // Initialize frame header fields
+    using namespace aeron::concurrent::logbuffer;
+    frame[DataFrameHeader::FRAME_LENGTH_FIELD_OFFSET] = 0;
+    frame[DataFrameHeader::VERSION_FIELD_OFFSET] =
+        DataFrameHeader::CURRENT_VERSION;
+    frame[DataFrameHeader::FLAGS_FIELD_OFFSET] = 0;
+    frame[DataFrameHeader::TYPE_FIELD_OFFSET] = DataFrameHeader::HDR_TYPE_DATA;
+
+    auto *aeronHeader = new aeron_header_t{};
+    aeronHeader->frame = reinterpret_cast<aeron_data_header_t *>(frame);
+    aeronHeader->fragmented_frame_length = NULL_VALUE;
+    aeronHeader->initial_term_id = 0;
+    aeronHeader->position_bits_to_shift = 0;
+    aeronHeader->context = nullptr;
+    return Header(aeronHeader);
+  }
 
 protected:
-    EmbeddedMediaDriver m_driver;
-    std::shared_ptr<Aeron> m_aeron;
-    std::shared_ptr<AeronCluster::Context> m_context;
-    std::shared_ptr<MockEgressListener> m_egressListener;
-    std::shared_ptr<ExclusivePublication> m_ingressPublication;
-    std::shared_ptr<Subscription> m_egressSubscription;
-    std::shared_ptr<Image> m_egressImage;
-    std::shared_ptr<AeronCluster> m_aeronCluster;
-    
-    std::vector<std::uint8_t> m_bufferData;
-    AtomicBuffer m_buffer;
-    std::vector<std::uint8_t> m_appMessageData;
-    AtomicBuffer m_appMessage;
-    Header m_header;
-    
-    std::int64_t m_nanoTime;
-    std::int32_t m_leadershipTermId;
-    std::int32_t m_leaderMemberId;
-    bool m_newLeaderEventPending;
-    
-    void makeEgressSubscriptionDeliverNewLeaderEvent()
-    {
-        m_newLeaderEventPending = true;
-    }
-    
-    void makeIngressPublicationReturn(std::int64_t result)
-    {
-        // Note: In real implementation, this would mock the publication
-        // For now, we use real publications which will return actual results
-    }
+  // 成员声明顺序必须和初始化列表顺序一致（C++按声明顺序初始化）
+  // 基础数据成员先声明（被其他成员依赖的）
+  std::int64_t m_nanoTime;
+  std::int32_t m_leadershipTermId;
+  std::int32_t m_leaderMemberId;
+  bool m_newLeaderEventPending;
+
+  // Buffer数据必须在AtomicBuffer之前
+  std::vector<std::uint8_t> m_bufferData;
+  std::vector<std::uint8_t> m_appMessageData;
+
+  // 依赖上面vector的成员
+  AtomicBuffer m_buffer;
+  AtomicBuffer m_appMessage;
+  Header m_header;
+
+  // Driver必须最先启动，最后停止
+  EmbeddedMediaDriver m_driver;
+
+  // Aeron相关（依赖driver）
+  std::shared_ptr<MockEgressListener> m_egressListener;
+  std::shared_ptr<Aeron> m_aeron;
+  std::shared_ptr<AeronCluster::Context> m_context;
+  std::shared_ptr<ExclusivePublication> m_ingressPublication;
+  std::shared_ptr<Subscription> m_egressSubscription;
+  std::shared_ptr<Image> m_egressImage;
+
+  // AeronCluster必须最后（依赖所有上面的成员）
+  std::shared_ptr<AeronCluster> m_aeronCluster;
+
+  void makeEgressSubscriptionDeliverNewLeaderEvent() {
+    m_newLeaderEventPending = true;
+  }
+
+  void makeIngressPublicationReturn(std::int64_t result) {
+    // Note: In real implementation, this would mock the publication
+    // For now, we use real publications which will return actual results
+  }
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    AeronClusterTestSuite,
-    AeronClusterTestFixture,
-    testing::Values(
-        std::make_tuple(false, false),
-        std::make_tuple(false, true),
-        std::make_tuple(true, false),
-        std::make_tuple(true, true)));
+INSTANTIATE_TEST_SUITE_P(AeronClusterTestSuite, AeronClusterTestFixture,
+                         testing::Values(std::make_tuple(false, false),
+                                         std::make_tuple(false, true),
+                                         std::make_tuple(true, false),
+                                         std::make_tuple(true, true)));
 
-TEST_P(AeronClusterTestFixture, shouldStayConnectedAfterSuccessfulFailover)
-{
-    const bool withIngressDisconnect = std::get<0>(GetParam());
-    const bool withAppMessages = std::get<1>(GetParam());
-    
-    // Note: This test requires mocking publication behavior
-    // Since we're using real publications, we'll test the basic functionality
-    // Full mock implementation would require more complex setup
-    
-    if (withAppMessages)
-    {
-        const std::int64_t result = m_aeronCluster->offer(m_appMessage, 0, 8);
-        EXPECT_GE(result, 0);
-    }
-    else
-    {
-        const bool keepAliveResult = m_aeronCluster->sendKeepAlive();
-        EXPECT_TRUE(keepAliveResult);
-    }
-    
-    // Simulate time passing
-    m_nanoTime += m_context->newLeaderTimeoutNs() - 1;
-    
-    // Note: Full test would require setting up NewLeaderEvent delivery
-    // This is complex with real subscriptions, so we test basic functionality
-    
-    EXPECT_FALSE(m_aeronCluster->isClosed());
-}
+TEST_P(AeronClusterTestFixture, shouldStayConnectedAfterSuccessfulFailover) {
+  const bool withIngressDisconnect = std::get<0>(GetParam());
+  const bool withAppMessages = std::get<1>(GetParam());
 
-TEST_P(AeronClusterTestFixture, shouldCloseItselfWhenDisconnectedForLongerThanNewLeaderTimeout)
-{
-    const bool withAppMessages = std::get<1>(GetParam());
-    
-    // Note: This test requires the publication to return NOT_CONNECTED
-    // With real publications, we can't easily simulate this
-    // We'll test the basic timeout logic
-    
-    if (withAppMessages)
-    {
-        // Try to send a message
-        const std::int64_t result = m_aeronCluster->offer(m_appMessage, 0, 8);
-        // Result could be various values depending on connection state
-    }
-    else
-    {
-        const bool keepAliveResult = m_aeronCluster->sendKeepAlive();
-        // Result depends on connection state
-    }
-    
-    m_nanoTime += m_context->newLeaderTimeoutNs() - 1;
-    
-    EXPECT_EQ(0, m_aeronCluster->pollEgress());
-    EXPECT_FALSE(m_aeronCluster->isClosed());
-    
-    m_nanoTime += 1;
-    
-    // Note: Full test would verify closure after timeout
-    // This requires proper state management testing
-}
+  // Note: This test requires mocking publication behavior
+  // Since we're using real publications, we'll test the basic functionality
+  // Full mock implementation would require more complex setup
 
-TEST_P(AeronClusterTestFixture, shouldCloseItselfWhenUnableToSendMessageForLongerThanNewLeaderConnectionTimeout)
-{
-    const bool withAppMessages = std::get<1>(GetParam());
-    
-    // Similar to above test, requires mock setup
-    // Testing basic functionality with real objects
-    
-    m_nanoTime += m_context->newLeaderTimeoutNs() / 2;
-    
-    EXPECT_FALSE(m_aeronCluster->isClosed());
-}
-
-TEST_F(AeronClusterTestFixture, shouldCloseIngressPublicationWhenEgressImageCloses)
-{
-    // Skip test if egressImage is not available (requires actual subscription with image)
-    if (!m_egressImage)
-    {
-        GTEST_SKIP() << "Egress image not available for this test";
-    }
-    
-    // Test in CONNECTED state - simulate image closing
-    // Note: In real scenario, we would mock the image to return isClosed() = true
-    // For now, we test the basic pollEgress functionality
-    const std::int32_t result = m_aeronCluster->pollEgress();
-    EXPECT_GE(result, 0);
-    
-    // Note: Full test would verify publication.close() was called when image closes
-    // This requires mocking the image or tracking publication state
-}
-
-TEST_F(AeronClusterTestFixture, shouldCloseItselfAfterReachingMaxPositionOnTheIngressPublication)
-{
-    // Note: This test requires the publication to return MAX_POSITION_EXCEEDED
-    // With real publications, we can't easily simulate this
-    // We'll test basic offer functionality
-    
+  if (withAppMessages) {
     const std::int64_t result = m_aeronCluster->offer(m_appMessage, 0, 8);
-    
-    // If we hit max position, the cluster should close
-    if (result == MAX_POSITION_EXCEEDED)
-    {
-        EXPECT_EQ(1, m_aeronCluster->pollStateChanges());
-        EXPECT_TRUE(m_aeronCluster->isClosed());
-    }
+    EXPECT_GE(result, 0);
+  } else {
+    const bool keepAliveResult = m_aeronCluster->sendKeepAlive();
+    EXPECT_TRUE(keepAliveResult);
+  }
+
+  // Simulate time passing
+  m_nanoTime += m_context->newLeaderTimeoutNs() - 1;
+
+  // Note: Full test would require setting up NewLeaderEvent delivery
+  // This is complex with real subscriptions, so we test basic functionality
+
+  EXPECT_FALSE(m_aeronCluster->isClosed());
 }
 
+TEST_P(AeronClusterTestFixture,
+       shouldCloseItselfWhenDisconnectedForLongerThanNewLeaderTimeout) {
+  const bool withAppMessages = std::get<1>(GetParam());
+
+  // Note: This test requires the publication to return NOT_CONNECTED
+  // With real publications, we can't easily simulate this
+  // We'll test the basic timeout logic
+
+  if (withAppMessages) {
+    // Try to send a message
+    const std::int64_t result = m_aeronCluster->offer(m_appMessage, 0, 8);
+    // Result could be various values depending on connection state
+  } else {
+    const bool keepAliveResult = m_aeronCluster->sendKeepAlive();
+    // Result depends on connection state
+  }
+
+  m_nanoTime += m_context->newLeaderTimeoutNs() - 1;
+
+  EXPECT_EQ(0, m_aeronCluster->pollEgress());
+  EXPECT_FALSE(m_aeronCluster->isClosed());
+
+  m_nanoTime += 1;
+
+  // Note: Full test would verify closure after timeout
+  // This requires proper state management testing
+}
+
+TEST_P(
+    AeronClusterTestFixture,
+    shouldCloseItselfWhenUnableToSendMessageForLongerThanNewLeaderConnectionTimeout) {
+  const bool withAppMessages = std::get<1>(GetParam());
+
+  // Similar to above test, requires mock setup
+  // Testing basic functionality with real objects
+
+  m_nanoTime += m_context->newLeaderTimeoutNs() / 2;
+
+  EXPECT_FALSE(m_aeronCluster->isClosed());
+}
+
+TEST_F(AeronClusterTestFixture,
+       shouldCloseIngressPublicationWhenEgressImageCloses) {
+  // Skip test if egressImage is not available (requires actual subscription
+  // with image)
+  if (!m_egressImage) {
+    GTEST_SKIP() << "Egress image not available for this test";
+  }
+
+  // Test in CONNECTED state - simulate image closing
+  // Note: In real scenario, we would mock the image to return isClosed() = true
+  // For now, we test the basic pollEgress functionality
+  const std::int32_t result = m_aeronCluster->pollEgress();
+  EXPECT_GE(result, 0);
+
+  // Note: Full test would verify publication.close() was called when image
+  // closes This requires mocking the image or tracking publication state
+}
+
+TEST_F(AeronClusterTestFixture,
+       shouldCloseItselfAfterReachingMaxPositionOnTheIngressPublication) {
+  // Note: This test requires the publication to return MAX_POSITION_EXCEEDED
+  // With real publications, we can't easily simulate this
+  // We'll test basic offer functionality
+
+  const std::int64_t result = m_aeronCluster->offer(m_appMessage, 0, 8);
+
+  // If we hit max position, the cluster should close
+  if (result == MAX_POSITION_EXCEEDED) {
+    EXPECT_EQ(1, m_aeronCluster->pollStateChanges());
+    EXPECT_TRUE(m_aeronCluster->isClosed());
+  }
+}
