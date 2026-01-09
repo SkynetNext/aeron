@@ -70,7 +70,16 @@ public:
     m_context->conclude();
   }
 
-  ~AeronClusterAsyncConnectTest() override { m_driver.stop(); }
+  ~AeronClusterAsyncConnectTest() override {
+    // Close Aeron client before stopping driver to avoid executor close issues
+    if (m_aeron) {
+      m_aeron.reset();
+    }
+    if (m_context) {
+      m_context.reset();
+    }
+    m_driver.stop();
+  }
 
 protected:
   EmbeddedMediaDriver m_driver;
