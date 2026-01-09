@@ -78,11 +78,9 @@ ctest -R aeronClusterAsyncConnectTestW --output-on-failure
 如果测试出现段错误（SegFault），可以使用 gdb 调试：
 
 ```bash
-# 1. 进入可执行文件目录
-cd /data/aeron/build/binaries
-
-# 2. 使用 gdb 运行测试
-gdb --args ./aeronClusterTestW
+# 在 build 目录下直接运行（无需切换目录）
+cd /data/aeron/build
+gdb --args ./binaries/aeronClusterTestW
 
 # 在 gdb 中：
 #   - 输入 run 运行程序
@@ -97,11 +95,12 @@ gdb --args ./aeronClusterTestW
 ulimit -c unlimited
 
 # 2. 运行测试（会生成 core 文件）
-cd /data/aeron/build/binaries
-./aeronClusterTestW
+cd /data/aeron/build
+./binaries/aeronClusterTestW
 
 # 3. 使用 gdb 分析 core dump
-gdb ./aeronClusterTestW core
+cd /data/aeron/build
+gdb ./binaries/aeronClusterTestW core
 # 在 gdb 中输入 bt 查看堆栈
 ```
 

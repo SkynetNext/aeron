@@ -100,13 +100,14 @@ static void *aeron_executor_dispatch(void *arg)
             aeron_err_clear();
         }
 
-        if (USE_RETURN_QUEUE(executor))
+        if (shutdown)
+        {
+            // Shutdown tasks should be released immediately, not queued
+            aeron_executor_task_release(task);
+        }
+        else if (USE_RETURN_QUEUE(executor))
         {
             aeron_blocking_linked_queue_offer_ex(&executor->return_queue, task, node);
-        }
-        else if (shutdown)
-        {
-            aeron_executor_task_release(task);
         }
         else
         {
