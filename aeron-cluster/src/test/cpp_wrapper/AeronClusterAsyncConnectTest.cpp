@@ -26,6 +26,8 @@
 #include "Publication.h"
 #include "Subscription.h"
 #include "cluster/client/AeronCluster.h"
+#include "cluster/client/ControlledEgressListener.h"
+#include "cluster/client/EgressListener.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/BackOffIdleStrategy.h"
 #include "concurrent/NoOpIdleStrategy.h"
@@ -53,6 +55,36 @@ inline std::int64_t nanoClock() {
       .count();
 }
 
+// Mock EgressListener for testing
+class MockEgressListener : public EgressListener {
+public:
+  MOCK_METHOD(void, onMessage,
+              (std::int64_t clusterSessionId, std::int64_t timestamp,
+               AtomicBuffer &buffer, util::index_t offset, util::index_t length,
+               Header &header),
+              (override));
+  MOCK_METHOD(void, onNewLeader,
+              (std::int64_t clusterSessionId, std::int64_t leadershipTermId,
+               std::int32_t leaderMemberId,
+               const std::string &ingressEndpoints),
+              (override));
+};
+
+// Mock ControlledEgressListener for testing
+class MockControlledEgressListener : public ControlledEgressListener {
+public:
+  MOCK_METHOD(Action, onMessage,
+              (std::int64_t clusterSessionId, std::int64_t timestamp,
+               AtomicBuffer &buffer, util::index_t offset, util::index_t length,
+               Header &header),
+              (override));
+  MOCK_METHOD(void, onNewLeader,
+              (std::int64_t clusterSessionId, std::int64_t leadershipTermId,
+               std::int32_t leaderMemberId,
+               const std::string &ingressEndpoints),
+              (override));
+};
+
 // Mock Aeron class - matches Java version which uses mock(Aeron.class)
 // Since Aeron is not a virtual class, we need to use a different approach
 // We'll create a mock that wraps Aeron functionality
@@ -76,7 +108,10 @@ public:
 class AeronClusterAsyncConnectTest : public testing::Test {
 public:
   AeronClusterAsyncConnectTest()
-      : m_context(std::make_shared<AeronCluster::Context>()) {
+      : m_egressListener(std::make_shared<MockEgressListener>()),
+        m_controlledEgressListener(
+            std::make_shared<MockControlledEgressListener>()),
+        m_context(std::make_shared<AeronCluster::Context>()) {
     // Use real EmbeddedMediaDriver like other C++ tests
     // (AeronClusterContextTest, EgressAdapterTest) Java version uses mock, but
     // C++ version uses real driver for integration testing
@@ -89,7 +124,9 @@ public:
         .egressStreamId(42)
         .ingressChannel("aeron:udp?endpoint=replace-me:5555")
         .ingressStreamId(-19)
-        .idleStrategy(std::make_shared<NoOpIdleStrategy>());
+        .idleStrategy(std::make_shared<NoOpIdleStrategy>())
+        .egressListener(m_egressListener)
+        .controlledEgressListener(m_controlledEgressListener);
 
     // Note: Java version doesn't call conclude() in constructor
     // It's called by asyncConnect() which calls ctx->conclude()
@@ -111,6 +148,8 @@ public:
 protected:
   EmbeddedMediaDriver m_driver;
   std::shared_ptr<Aeron> m_aeron;
+  std::shared_ptr<MockEgressListener> m_egressListener;
+  std::shared_ptr<MockControlledEgressListener> m_controlledEgressListener;
   std::shared_ptr<AeronCluster::Context> m_context;
 };
 
