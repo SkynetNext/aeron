@@ -3241,15 +3241,9 @@ void aeron_driver_async_client_command_complete(
     void *task_clientd,
     void *executor_clientd)
 {
-    if (NULL == task_clientd || NULL == executor_clientd)
-    {
-        return;  // Defensive check: invalid parameters
-    }
-
     aeron_driver_async_client_command_t *async_client_command = task_clientd;
     aeron_driver_conductor_t *conductor = executor_clientd;
-    int64_t correlation_id = (NULL != async_client_command->correlated) ?
-        async_client_command->correlated->correlation_id : 0;
+    int64_t correlation_id = async_client_command->correlated->correlation_id;
 
     conductor->async_client_command_in_flight = false;
 
@@ -3301,7 +3295,6 @@ int aeron_driver_async_client_command_allocate(
 
     async_client_command->on_error = NULL;
     async_client_command->on_complete = NULL;  // Initialize to NULL, must be set before submit
-    async_client_command->correlated = NULL;  // Initialize to NULL, must be set before submit
     async_client_command->async_command.original_command =
         (void *)((const char *)async_client_command + AERON_PADDED_SIZEOF(aeron_driver_async_client_command_t));
 
@@ -3835,12 +3828,6 @@ static void aeron_driver_conductor_on_rb_command_queue(
 int aeron_driver_conductor_do_work(void *clientd)
 {
     aeron_driver_conductor_t *conductor = (aeron_driver_conductor_t *)clientd;
-    // Defensive check: ensure nano_clock is set (should never be NULL after proper initialization)
-    if (NULL == conductor->context || NULL == conductor->context->nano_clock)
-    {
-        AERON_SET_ERR(EINVAL, "%s", "conductor context or nano_clock is NULL");
-        return -1;
-    }
     const int64_t now_ns = conductor->context->nano_clock();
     aeron_driver_conductor_track_time(conductor, now_ns);
     const int64_t now_ms = aeron_clock_cached_epoch_time(conductor->context->cached_clock);

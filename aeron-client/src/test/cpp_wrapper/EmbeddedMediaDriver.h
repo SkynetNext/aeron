@@ -26,145 +26,151 @@
 #endif
 #endif
 
-#include <atomic>
-#include <stdexcept>
 #include <string>
 #include <thread>
+#include <atomic>
+#include <stdexcept>
 
-extern "C" {
-#include "aeron_driver_context.h"
+extern "C"
+{
 #include "aeronmd.h"
 }
 
-namespace aeron {
+namespace aeron
+{
 
-class EmbeddedMediaDriver {
+class EmbeddedMediaDriver
+{
 public:
-  ~EmbeddedMediaDriver() {
-    if (0 != aeron_driver_close(m_driver)) {
-      fprintf(stderr, "ERROR: driver close (%d) %s\n", aeron_errcode(),
-              aeron_errmsg());
+    ~EmbeddedMediaDriver()
+    {
+        if (0 != aeron_driver_close(m_driver))
+        {
+            fprintf(stderr, "ERROR: driver close (%d) %s\n", aeron_errcode(), aeron_errmsg());
+        }
+
+        if (0 != aeron_driver_context_close(m_context))
+        {
+            fprintf(stderr, "ERROR: driver context close (%d) %s\n", aeron_errcode(), aeron_errmsg());
+        }
     }
 
-    if (0 != aeron_driver_context_close(m_context)) {
-      fprintf(stderr, "ERROR: driver context close (%d) %s\n", aeron_errcode(),
-              aeron_errmsg());
-    }
-  }
-
-  void driverLoop() {
-    while (m_running) {
-      aeron_driver_main_idle_strategy(m_driver,
-                                      aeron_driver_main_do_work(m_driver));
-    }
-  }
-
-  void stop() {
-    m_running = false;
-    if (m_thread.joinable()) {
-      m_thread.join();
-    }
-  }
-
-  void start() {
-    if (init() < 0) {
-      throw std::runtime_error("could not initialize");
+    void driverLoop()
+    {
+        while (m_running)
+        {
+            aeron_driver_main_idle_strategy(m_driver, aeron_driver_main_do_work(m_driver));
+        }
     }
 
-    m_thread = std::thread([&]() { driverLoop(); });
-  }
+    void stop()
+    {
+        m_running = false;
+        if (m_thread.joinable())
+        {
+            m_thread.join();
+        }
+    }
 
-  void livenessTimeoutNs(std::uint64_t livenessTimeoutNs) {
-    m_livenessTimeoutNs = livenessTimeoutNs;
-  }
+    void start()
+    {
+        if (init() < 0)
+        {
+            throw std::runtime_error("could not initialize");
+        }
 
-  std::uint64_t livenessTimeoutNs() { return m_livenessTimeoutNs; }
+        m_thread = std::thread(
+            [&]()
+            {
+                driverLoop();
+            });
+    }
 
-  void aeronDir(std::string aeronDir) { m_aeronDir = aeronDir; }
+    void livenessTimeoutNs(std::uint64_t livenessTimeoutNs)
+    {
+        m_livenessTimeoutNs = livenessTimeoutNs;
+    }
 
-  std::string aeronDir() { return m_aeronDir; }
+    std::uint64_t livenessTimeoutNs()
+    {
+        return m_livenessTimeoutNs;
+    }
+
+    void aeronDir(std::string aeronDir)
+    {
+        m_aeronDir = aeronDir;
+    }
+
+    std::string aeronDir()
+    {
+        return m_aeronDir;
+    }
 
 protected:
-  int init() {
-    if (aeron_driver_context_init(&m_context) < 0) {
-      fprintf(stderr, "ERROR: context init (%d) %s\n", aeron_errcode(),
-              aeron_errmsg());
-      return -1;
-    }
+    int init()
+    {
+        if (aeron_driver_context_init(&m_context) < 0)
+        {
+            fprintf(stderr, "ERROR: context init (%d) %s\n", aeron_errcode(), aeron_errmsg());
+            return -1;
+        }
 
-    if (!m_aeronDir.empty()) {
-      aeron_driver_context_set_dir(m_context, m_aeronDir.c_str());
-    }
-    aeron_driver_context_set_dir_delete_on_start(m_context, true);
-    aeron_driver_context_set_dir_delete_on_shutdown(m_context, true);
-    aeron_driver_context_set_threading_mode(m_context,
-                                            AERON_THREADING_MODE_SHARED);
-    aeron_driver_context_set_shared_idle_strategy(m_context, "sleep-ns");
-    aeron_driver_context_set_term_buffer_sparse_file(m_context, true);
-    aeron_driver_context_set_term_buffer_length(m_context, 64 * 1024);
-    aeron_driver_context_set_ipc_term_buffer_length(m_context, 64 * 1024);
-    aeron_driver_context_set_timer_interval_ns(m_context,
-                                               m_livenessTimeoutNs / 100);
-    aeron_driver_context_set_client_liveness_timeout_ns(m_context,
-                                                        m_livenessTimeoutNs);
-    aeron_driver_context_set_publication_linger_timeout_ns(
-        m_context, m_livenessTimeoutNs / 10);
-    aeron_driver_context_set_image_liveness_timeout_ns(
-        m_context, m_livenessTimeoutNs / 10);
-    aeron_driver_context_set_enable_experimental_features(m_context, true);
+        if (!m_aeronDir.empty())
+        {
+            aeron_driver_context_set_dir(m_context, m_aeronDir.c_str());
+        }
+        aeron_driver_context_set_dir_delete_on_start(m_context, true);
+        aeron_driver_context_set_dir_delete_on_shutdown(m_context, true);
+        aeron_driver_context_set_threading_mode(m_context, AERON_THREADING_MODE_SHARED);
+        aeron_driver_context_set_shared_idle_strategy(m_context, "sleep-ns");
+        aeron_driver_context_set_term_buffer_sparse_file(m_context, true);
+        aeron_driver_context_set_term_buffer_length(m_context, 64 * 1024);
+        aeron_driver_context_set_ipc_term_buffer_length(m_context, 64 * 1024);
+        aeron_driver_context_set_timer_interval_ns(m_context, m_livenessTimeoutNs / 100);
+        aeron_driver_context_set_client_liveness_timeout_ns(m_context, m_livenessTimeoutNs);
+        aeron_driver_context_set_publication_linger_timeout_ns(m_context, m_livenessTimeoutNs / 10);
+        aeron_driver_context_set_image_liveness_timeout_ns(m_context, m_livenessTimeoutNs / 10);
+        aeron_driver_context_set_enable_experimental_features(m_context, true);
 
-    // Ensure nano_clock is set (defensive: should already be set by
-    // aeron_driver_context_init) This is needed because some initialization
-    // paths might not set it properly
-    if (NULL == m_context->nano_clock) {
-      m_context->nano_clock = aeron_nano_clock;
-    }
-    if (NULL == m_context->epoch_clock) {
-      m_context->epoch_clock = aeron_epoch_clock;
-    }
+        long long debugTimeoutMs;
+        if (0 != (debugTimeoutMs = EmbeddedMediaDriver::getDebugTimeoutMs()))
+        {
+            aeron_driver_context_set_driver_timeout_ms(m_context, debugTimeoutMs);
+            aeron_driver_context_set_client_liveness_timeout_ns(m_context, debugTimeoutMs * 1000000LL);
+            aeron_driver_context_set_image_liveness_timeout_ns(m_context, debugTimeoutMs * 1000000LL);
+            aeron_driver_context_set_publication_unblock_timeout_ns(m_context, 2 * debugTimeoutMs * 1000000LL);
+        }
 
-    long long debugTimeoutMs;
-    if (0 != (debugTimeoutMs = EmbeddedMediaDriver::getDebugTimeoutMs())) {
-      aeron_driver_context_set_driver_timeout_ms(m_context, debugTimeoutMs);
-      aeron_driver_context_set_client_liveness_timeout_ns(
-          m_context, debugTimeoutMs * 1000000LL);
-      aeron_driver_context_set_image_liveness_timeout_ns(
-          m_context, debugTimeoutMs * 1000000LL);
-      aeron_driver_context_set_publication_unblock_timeout_ns(
-          m_context, 2 * debugTimeoutMs * 1000000LL);
-    }
+        if (aeron_driver_init(&m_driver, m_context) < 0)
+        {
+            fprintf(stderr, "ERROR: driver init (%d) %s\n", aeron_errcode(), aeron_errmsg());
+            return -1;
+        }
 
-    if (aeron_driver_init(&m_driver, m_context) < 0) {
-      fprintf(stderr, "ERROR: driver init (%d) %s\n", aeron_errcode(),
-              aeron_errmsg());
-      return -1;
-    }
+        if (aeron_driver_start(m_driver, true) < 0)
+        {
+            fprintf(stderr, "ERROR: driver start (%d) %s\n", aeron_errcode(), aeron_errmsg());
+            return -1;
+        }
 
-    if (aeron_driver_start(m_driver, true) < 0) {
-      fprintf(stderr, "ERROR: driver start (%d) %s\n", aeron_errcode(),
-              aeron_errmsg());
-      return -1;
+        return 0;
     }
-
-    return 0;
-  }
 
 private:
-  std::uint64_t m_livenessTimeoutNs = 5 * 1000 * 1000 * 1000LL;
-  std::string m_aeronDir;
-  std::atomic<bool> m_running = {true};
-  std::thread m_thread;
-  aeron_driver_context_t *m_context = nullptr;
-  aeron_driver_t *m_driver = nullptr;
+    std::uint64_t m_livenessTimeoutNs = 5 * 1000 * 1000 * 1000LL;
+    std::string m_aeronDir;
+    std::atomic<bool> m_running = { true };
+    std::thread m_thread;
+    aeron_driver_context_t *m_context = nullptr;
+    aeron_driver_t *m_driver = nullptr;
 
-  static long long getDebugTimeoutMs() {
-    const char *debug_timeout_str = getenv("AERON_DEBUG_TIMEOUT");
-    return nullptr != debug_timeout_str
-               ? strtoll(debug_timeout_str, nullptr, 10)
-               : 0LL;
-  }
+    static long long getDebugTimeoutMs()
+    {
+        const char *debug_timeout_str = getenv("AERON_DEBUG_TIMEOUT");
+        return nullptr != debug_timeout_str ? strtoll(debug_timeout_str, nullptr, 10) : 0LL;
+    }
 };
 
-} // namespace aeron
+}
 
-#endif // AERON_EMBEDDED_MEDIA_DRIVER_H
+#endif //AERON_EMBEDDED_MEDIA_DRIVER_H

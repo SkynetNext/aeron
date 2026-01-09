@@ -18,54 +18,47 @@
 #define AERON_DUTY_CYCLE_TRACKER_H
 
 #include "aeron_driver_common.h"
-#include "concurrent/aeron_counters_manager.h"
 
-typedef void (*aeron_duty_cycle_tracker_update_func_t)(void *state,
-                                                       int64_t now_ns);
-typedef void (*aeron_duty_cycle_tracker_measure_and_update_func_t)(
-    void *state, int64_t now_ns);
+typedef void (*aeron_duty_cycle_tracker_update_func_t)(void *state, int64_t now_ns);
+typedef void (*aeron_duty_cycle_tracker_measure_and_update_func_t)(void *state, int64_t now_ns);
 
-struct aeron_duty_cycle_tracker_stct {
-  aeron_duty_cycle_tracker_update_func_t update;
-  aeron_duty_cycle_tracker_measure_and_update_func_t measure_and_update;
-  void *state;
+struct aeron_duty_cycle_tracker_stct
+{
+    aeron_duty_cycle_tracker_update_func_t update;
+    aeron_duty_cycle_tracker_measure_and_update_func_t measure_and_update;
+    void *state;
 };
 
 typedef struct aeron_duty_cycle_stall_tracker_stct {
-  struct aeron_duty_cycle_tracker_stct tracker;
-  char lhs_padding[AERON_CACHE_LINE_LENGTH - sizeof(int64_t)];
-  int64_t last_time_of_update_ns;
-  char rhs_padding[AERON_CACHE_LINE_LENGTH - sizeof(int64_t)];
-  uint64_t cycle_threshold_ns;
-  int64_t *max_cycle_time_counter;
-  int64_t *cycle_time_threshold_exceeded_counter;
-} aeron_duty_cycle_stall_tracker_t;
+    struct aeron_duty_cycle_tracker_stct tracker;
+    char lhs_padding[AERON_CACHE_LINE_LENGTH - sizeof(int64_t)];
+    int64_t last_time_of_update_ns;
+    char rhs_padding[AERON_CACHE_LINE_LENGTH - sizeof(int64_t)];
+    uint64_t cycle_threshold_ns;
+    int64_t *max_cycle_time_counter;
+    int64_t *cycle_time_threshold_exceeded_counter;
+}
+aeron_duty_cycle_stall_tracker_t;
 
-inline void aeron_duty_cycle_stall_tracker_update(void *state, int64_t now_ns) {
-  aeron_duty_cycle_stall_tracker_t *tracker =
-      (aeron_duty_cycle_stall_tracker_t *)state;
+inline void aeron_duty_cycle_stall_tracker_update(void *state, int64_t now_ns)
+{
+    aeron_duty_cycle_stall_tracker_t *tracker = (aeron_duty_cycle_stall_tracker_t *)state;
 
-  tracker->last_time_of_update_ns = now_ns;
+    tracker->last_time_of_update_ns = now_ns;
 }
 
-inline void aeron_duty_cycle_stall_tracker_measure_and_update(void *state,
-                                                              int64_t now_ns) {
-  aeron_duty_cycle_stall_tracker_t *tracker =
-      (aeron_duty_cycle_stall_tracker_t *)state;
-  int64_t cycle_time_ns = now_ns - tracker->last_time_of_update_ns;
+inline void aeron_duty_cycle_stall_tracker_measure_and_update(void *state, int64_t now_ns)
+{
+    aeron_duty_cycle_stall_tracker_t *tracker = (aeron_duty_cycle_stall_tracker_t *)state;
+    int64_t cycle_time_ns = now_ns - tracker->last_time_of_update_ns;
 
-  // Defensive check: ensure counters are initialized before use
-  if (NULL != tracker->max_cycle_time_counter) {
-    aeron_counter_propose_max_release(tracker->max_cycle_time_counter,
-                                      cycle_time_ns);
-  }
-  if (cycle_time_ns > (int64_t)(tracker->cycle_threshold_ns) &&
-      NULL != tracker->cycle_time_threshold_exceeded_counter) {
-    aeron_counter_increment_release(
-        tracker->cycle_time_threshold_exceeded_counter);
-  }
+    aeron_counter_propose_max_release(tracker->max_cycle_time_counter, cycle_time_ns);
+    if (cycle_time_ns > (int64_t)(tracker->cycle_threshold_ns))
+    {
+        aeron_counter_increment_release(tracker->cycle_time_threshold_exceeded_counter);
+    }
 
-  tracker->last_time_of_update_ns = now_ns;
+    tracker->last_time_of_update_ns = now_ns;
 }
 
 #endif // AERON_DUTY_CYCLE_TRACKER_H

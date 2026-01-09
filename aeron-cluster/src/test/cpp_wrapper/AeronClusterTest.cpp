@@ -104,7 +104,10 @@ public:
         .egressListener(m_egressListener)
         .newLeaderTimeoutNs(std::chrono::seconds(1).count());
 
-    m_context->conclude();
+    // Note: Java version calls conclude(), but since we pass nullptr for aeron,
+    // conclude() would auto-create a real Aeron which tries to connect to
+    // driver. We skip conclude() for now since we can't mock Aeron in C++.
+    // m_context->conclude();
 
     // Note: Since we can't easily mock Publication/Subscription/Image in C++,
     // and AeronCluster requires these types, we need a different approach.
