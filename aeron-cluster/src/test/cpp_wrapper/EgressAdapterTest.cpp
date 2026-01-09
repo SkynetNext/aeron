@@ -450,8 +450,15 @@ TEST_F(EgressAdapterTest, onFragmentShouldInvokeOnAdminResponseCallbackIfSession
     auto egressListener = std::make_shared<MockEgressListener>();
     EgressAdapter adapter(egressListener, clusterSessionId, m_subscription, 10);
     
+    // Calculate payloadOffset the same way as EgressAdapter does
+    // offset() returns offset + MessageHeader::encodedLength()
+    const std::int32_t adminResponseOffset = offset + messageHeader.encodedLength();
     const std::int32_t payloadOffset = static_cast<std::int32_t>(
-        offset + messageHeader.encodedLength() + encoder.encodedLength() - static_cast<std::int32_t>(payload.size()));
+        adminResponseOffset +
+        AdminResponse::SBE_BLOCK_LENGTH +
+        AdminResponse::messageHeaderLength() +
+        static_cast<std::int32_t>(message.length()) +
+        AdminResponse::payloadHeaderLength());
     
     EXPECT_CALL(*egressListener, onAdminResponse(
         clusterSessionId,
