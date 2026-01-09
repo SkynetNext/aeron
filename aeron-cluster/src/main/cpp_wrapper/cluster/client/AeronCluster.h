@@ -2467,4 +2467,8 @@ inline std::unique_ptr<AeronCluster::AsyncConnect> AeronCluster::asyncConnect(st
     }
 }
 
+// Definition of static constexpr members (required for ODR-use in some contexts)
+constexpr int AeronCluster::FRAGMENT_LIMIT;
+constexpr int AeronCluster::SEND_ATTEMPTS;
+
 }}}

@@ -19,14 +19,12 @@ cmake .. -DCMAKE_BUILD_TYPE=Debug \
          -DAERON_TESTS=ON \
          -DAERON_UNIT_TESTS=ON
 
-         make -j$(nproc)
+make -j$(nproc)
 
 # 如果段错误，可以使用 gdb 调试：
-# gdb --args ./aeronClusterTestW
-# 或者直接运行并查看 core dump：
-# ulimit -c unlimited
-# ./aeronClusterTestW
-# gdb ./aeronClusterTestW core
+# 可执行文件在 binaries 目录下
+cd /data/aeron/build/binaries
+gdb --args ./aeronClusterTestW
 
 cd /data/aeron/build
 ctest -R egressPollerTestW -R aeronClusterContextTestW -R aeronClusterTestW -R egressAdapterTestW -R aeronClusterAsyncConnectTestW --output-on-failure
