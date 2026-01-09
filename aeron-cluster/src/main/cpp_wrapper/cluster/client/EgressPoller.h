@@ -273,14 +273,11 @@ public:
             return ControlledPollAction::CONTINUE; // skip unknown schemas
         }
 
-        // Read version from buffer (offset 6 in SBE MessageHeader) to use as schemaVersion
-        // This matches Java behavior where wrap() uses the version from buffer
-        const std::uint16_t bufferVersion = buffer.getUInt16(offset + 6);
-        
+        // Now that we know schemaId matches, use cluster's schemaVersion for wrap()
         m_messageHeaderDecoder.wrap(
             reinterpret_cast<char *>(buffer.buffer()),
             offset,
-            bufferVersion,
+            MessageHeader::sbeSchemaVersion(),
             buffer.capacity());
 
         m_templateId = m_messageHeaderDecoder.templateId();
