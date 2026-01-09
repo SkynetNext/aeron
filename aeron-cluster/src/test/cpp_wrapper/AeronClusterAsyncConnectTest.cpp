@@ -28,6 +28,7 @@
 #include "cluster/client/AeronCluster.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/BackOffIdleStrategy.h"
+#include "concurrent/NoOpIdleStrategy.h"
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/logbuffer/Header.h"
 #include "generated/aeron_cluster_codecs/EventCode.h"
@@ -52,10 +53,32 @@ inline std::int64_t nanoClock() {
       .count();
 }
 
+// Mock Aeron class - matches Java version which uses mock(Aeron.class)
+// Since Aeron is not a virtual class, we need to use a different approach
+// We'll create a mock that wraps Aeron functionality
+class MockAeron {
+public:
+  MOCK_METHOD(std::int64_t, addSubscription,
+              (const std::string &, std::int32_t));
+  MOCK_METHOD(std::shared_ptr<Subscription>, findSubscription, (std::int64_t));
+  MOCK_METHOD(AsyncAddExclusivePublication *, addExclusivePublicationAsync,
+              (const std::string &, std::int32_t));
+  MOCK_METHOD(std::int64_t, addExclusivePublicationAsyncGetRegistrationId,
+              (AsyncAddExclusivePublication *));
+  MOCK_METHOD(AsyncAddPublication *, addPublicationAsync,
+              (const std::string &, std::int32_t));
+  MOCK_METHOD(std::int64_t, addPublicationAsyncGetRegistrationId,
+              (AsyncAddPublication *));
+  MOCK_METHOD(std::shared_ptr<Publication>, findPublication, (std::int64_t));
+  MOCK_METHOD(Context &, context, ());
+};
+
 class AeronClusterAsyncConnectTest : public testing::Test {
 public:
   AeronClusterAsyncConnectTest()
-      : m_driver(), m_context(std::make_shared<AeronCluster::Context>()) {
+      : m_context(std::make_shared<AeronCluster::Context>()) {
+    // Java version uses mock Aeron - we'll use a real EmbeddedMediaDriver
+    // but configure it to match Java test behavior
     m_driver.start();
     m_aeron = Aeron::connect();
 
@@ -65,7 +88,7 @@ public:
         .egressStreamId(42)
         .ingressChannel("aeron:udp?endpoint=replace-me:5555")
         .ingressStreamId(-19)
-        .idleStrategy(std::make_shared<BackoffIdleStrategy>());
+        .idleStrategy(std::make_shared<NoOpIdleStrategy>());
 
     m_context->conclude();
   }
