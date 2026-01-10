@@ -318,28 +318,28 @@ TEST_F(AeronClusterAsyncConnectTest, shouldConnectViaIngressChannel) {
   EXPECT_EQ(AeronCluster::AsyncConnect::State::POLL_RESPONSE,
             asyncConnect->state());
 
-  // Step 5: Create a publication to send SessionEvent response to egress channel
-  // Get the egress channel from the context
+  // Step 5: Create a publication to send SessionEvent response to egress
+  // channel Get the egress channel from the context
   const std::string egressChannel = m_context->egressChannel();
   const std::int32_t egressStreamId = m_context->egressStreamId();
 
   // Create a publication to send response (this simulates the cluster sending
-  // SessionEvent)
-  std::int64_t responsePubId =
-      m_aeron->addPublication(egressChannel, egressStreamId);
-  std::shared_ptr<Publication> responsePublication =
-      m_aeron->findPublication(responsePubId);
+  // SessionEvent) - use async API to avoid "Unknown registration id" exception
+  AsyncAddPublication *asyncAddPub =
+      m_aeron->addPublicationAsync(egressChannel, egressStreamId);
+  std::shared_ptr<Publication> responsePublication;
 
-  // Wait for publication to be available
+  // Wait for publication to be available using async API
   maxPolls = 100;
   while (!responsePublication && maxPolls-- > 0) {
     if (m_aeron->usesAgentInvoker()) {
       m_aeron->conductorAgentInvoker().invoke();
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    responsePublication = m_aeron->findPublication(responsePubId);
+    responsePublication = m_aeron->findPublication(asyncAddPub);
   }
-  EXPECT_NE(nullptr, responsePublication) << "Failed to create response publication";
+  EXPECT_NE(nullptr, responsePublication)
+      << "Failed to create response publication";
 
   // Wait for publication to connect
   maxPolls = 100;
@@ -367,7 +367,7 @@ TEST_F(AeronClusterAsyncConnectTest, shouldConnectViaIngressChannel) {
 
   MessageHeader messageHeader;
   messageHeader.wrap(reinterpret_cast<char *>(buffer.buffer()), 0,
-                      MessageHeader::sbeSchemaVersion(), buffer.capacity());
+                     MessageHeader::sbeSchemaVersion(), buffer.capacity());
   messageHeader.blockLength(SessionEvent::sbeBlockLength());
   messageHeader.templateId(SessionEvent::sbeTemplateId());
   messageHeader.schemaId(SessionEvent::sbeSchemaId());
@@ -375,9 +375,8 @@ TEST_F(AeronClusterAsyncConnectTest, shouldConnectViaIngressChannel) {
 
   SessionEvent sessionEvent;
   const util::index_t headerLength = MessageHeader::encodedLength();
-  sessionEvent.wrapForEncode(
-      reinterpret_cast<char *>(buffer.buffer()),
-      headerLength, buffer.capacity());
+  sessionEvent.wrapForEncode(reinterpret_cast<char *>(buffer.buffer()),
+                             headerLength, buffer.capacity());
   sessionEvent.clusterSessionId(testClusterSessionId);
   sessionEvent.correlationId(testCorrelationId);
   sessionEvent.leadershipTermId(testLeadershipTermId);
@@ -388,7 +387,7 @@ TEST_F(AeronClusterAsyncConnectTest, shouldConnectViaIngressChannel) {
       SessionEvent::leaderHeartbeatTimeoutNsNullValue());
   const std::string detail = "you are now connected";
   sessionEvent.putDetail(detail.data(),
-                          static_cast<std::uint32_t>(detail.length()));
+                         static_cast<std::uint32_t>(detail.length()));
 
   const util::index_t messageLength =
       headerLength + sessionEvent.encodedLength();
