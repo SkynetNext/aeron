@@ -105,7 +105,7 @@ if (NOT WIN32)
     set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 endif ()
 
-target_link_libraries(aeron_client_wrapper INTERFACE ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(aeron_client_wrapper INTERFACE aeron ${CMAKE_THREAD_LIBS_INIT})
 
 if (AERON_INSTALL_TARGETS)
     install(

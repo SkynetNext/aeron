@@ -299,11 +299,11 @@ inline void NodeStateFile::loadInitialState(
         NodeStateHeaderDecoder::sbeBlockLength(), NodeStateHeaderDecoder::sbeSchemaVersion());
 
     const std::int32_t version = nodeStateHeaderDecoder.version();
-    if (ClusterMarkFile::MAJOR_VERSION != SemanticVersion::major(version))
+    if (service::ClusterMarkFile::MAJOR_VERSION != SemanticVersion::major(version))
     {
         throw ClusterException(
             "mark file major version " + std::to_string(SemanticVersion::major(version)) +
-            " does not match software: " + std::to_string(ClusterMarkFile::MAJOR_VERSION),
+            " does not match software: " + std::to_string(service::ClusterMarkFile::MAJOR_VERSION),
             SOURCEINFO);
     }
 
@@ -346,7 +346,7 @@ inline void NodeStateFile::initialiseDecodersOnCreation(
     
     // Initialize NodeStateHeader using wrapAndApplyHeader for encoding
     nodeStateHeaderDecoder.wrapAndApplyHeader(buf, 0, bufLen);
-    nodeStateHeaderDecoder.version(ClusterMarkFile::SEMANTIC_VERSION);
+    nodeStateHeaderDecoder.version(service::ClusterMarkFile::SEMANTIC_VERSION);
 
     const std::int32_t candidateTermFrameOffset = static_cast<std::int32_t>(NodeStateHeaderDecoder::SBE_BLOCK_LENGTH);
     verifyAlignment(candidateTermFrameOffset);

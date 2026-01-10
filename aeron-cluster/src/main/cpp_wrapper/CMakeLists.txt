@@ -85,11 +85,19 @@ file(GLOB_RECURSE HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/cluster/**/*.h"
 )
 
-# header only library
-add_library(aeron_cluster_wrapper INTERFACE)
+# Source files - explicitly list them for reliability
+set(SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/cluster/ConsensusModuleAgent.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cluster/Election.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cluster/ConsensusModule.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cluster/PendingServiceMessageTracker.cpp"
+)
+
+# Regular library with .cpp implementation files
+add_library(aeron_cluster_wrapper ${SOURCES})
 add_library(aeron::aeron_cluster_wrapper ALIAS aeron_cluster_wrapper)
 target_include_directories(aeron_cluster_wrapper
-    INTERFACE
+    PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"
     "$<BUILD_INTERFACE:${AERON_CLIENT_WRAPPER_SOURCE_PATH}>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>"
@@ -97,8 +105,6 @@ target_include_directories(aeron_cluster_wrapper
 )
 
 add_dependencies(aeron_cluster_wrapper cluster_cpp_codecs archive_cpp_codecs)
-
-target_sources(aeron_cluster_wrapper INTERFACE "$<BUILD_INTERFACE:${HEADERS}>")
 
 if (MSVC)
     string(REPLACE "/" "\\\\" NATIVE_PROJECT_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
@@ -112,7 +118,7 @@ if (NOT WIN32)
 endif ()
 
 target_link_libraries(aeron_cluster_wrapper 
-    INTERFACE 
+    PUBLIC 
     aeron_client_wrapper
     aeron_archive_wrapper
     ${CMAKE_THREAD_LIBS_INIT}

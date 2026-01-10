@@ -1,64 +1,60 @@
 #pragma once
 
-#include <memory>
-#include <cstdint>
-#include <string>
-#include "client/archive/AeronArchive.h"
 #include "ChannelUri.h"
+#include "ConsensusModule.h" // Must include for ConsensusModule::Context
 #include "Image.h"
+#include "LogAdapter.h"
 #include "Subscription.h"
 #include "client/ClusterExceptions.h"
-#include "util/CloseHelper.h"
+#include "client/archive/AeronArchive.h"
 #include "concurrent/CountedErrorHandler.h"
-#include "LogAdapter.h"
-#include "ConsensusModuleAgent.h"  // For ConsensusModuleAgent::State
+#include "util/CloseHelper.h"
+#include <cstdint>
+#include <memory>
+#include <string>
 
-namespace aeron { namespace cluster {
+namespace aeron {
+namespace cluster {
 
-using namespace aeron::concurrent;
-
-class ConsensusModuleAgent; // Forward declaration
-class ConsensusModule; // Forward declaration
+// Forward declaration
+class ConsensusModuleAgent;
 
 /**
  * Replay of log from archive.
  */
-class LogReplay
-{
+class LogReplay {
 public:
-    LogReplay(
-        std::shared_ptr<archive::client::AeronArchive> archive,
-        std::int64_t recordingId,
-        std::int64_t startPosition,
-        std::int64_t stopPosition,
-        LogAdapter& logAdapter,
-        ConsensusModuleContext& ctx);
+  LogReplay(std::shared_ptr<archive::client::AeronArchive> archive,
+            std::int64_t recordingId, std::int64_t startPosition,
+            std::int64_t stopPosition, LogAdapter &logAdapter,
+            ConsensusModule::Context &ctx);
 
-    ~LogReplay();
+  ~LogReplay();
 
-    void close();
+  void close();
 
-    std::int32_t doWork();
+  std::int32_t doWork();
 
-    bool isDone() const;
+  bool isDone() const;
 
-    std::int64_t position() const;
+  std::int64_t position() const;
 
-    std::string toString() const;
+  std::string toString() const;
 
 private:
-    std::shared_ptr<archive::client::AeronArchive> m_archive;
-    std::int64_t m_startPosition;
-    std::int64_t m_stopPosition;
-    std::int64_t m_replaySessionId;
-    std::int32_t m_logSessionId;
-    ConsensusModuleAgent* m_consensusModuleAgent;
-    ConsensusModuleContext* m_ctx;
-    LogAdapter& m_logAdapter;
-    std::shared_ptr<Subscription> m_logSubscription;
+  std::shared_ptr<archive::client::AeronArchive> m_archive;
+  std::int64_t m_startPosition;
+  std::int64_t m_stopPosition;
+  std::int64_t m_replaySessionId;
+  std::int32_t m_logSessionId;
+  ConsensusModuleAgent *m_consensusModuleAgent;
+  ConsensusModule::Context *m_ctx;
+  LogAdapter &m_logAdapter;
+  std::shared_ptr<Subscription> m_logSubscription;
 };
 
-// Implementation moved to ConsensusModuleAgent.h to resolve circular dependencies
+// Implementation moved to ConsensusModuleAgent.h to resolve circular
+// dependencies
 
-}}
-
+} // namespace cluster
+} // namespace aeron

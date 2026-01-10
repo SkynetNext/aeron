@@ -42,7 +42,7 @@ public:
     bool onTimerExpiry(
         std::chrono::milliseconds::rep timeUnit,
         std::int64_t now,
-        std::int64_t timerId) override;
+        std::int64_t timerId);
 
     void scheduleTimerForCorrelationId(std::int64_t correlationId, std::int64_t deadline) override;
 

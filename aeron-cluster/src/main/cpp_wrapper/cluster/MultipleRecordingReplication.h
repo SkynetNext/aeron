@@ -6,14 +6,13 @@
 #include <cstdint>
 #include <string>
 #include "client/archive/AeronArchive.h"
-#include "archive/codecs/RecordingSignal.h"
+#include "client/archive/ArchiveContext.h"
 #include "util/CloseHelper.h"
 #include "RecordingReplication.h"
 
 namespace aeron { namespace cluster {
 
 using namespace aeron::archive::client;
-using namespace aeron::archive::codecs;
 
 /**
  * Replication of multiple recordings.

@@ -5,9 +5,10 @@
 #include <cstdint>
 #include <string>
 #include "client/archive/AeronArchive.h"
-#include "archive/codecs/RecordingSignal.h"
+#include "client/archive/ArchiveContext.h"
 
 namespace aeron { namespace cluster {
+using namespace aeron::archive::client;
 
 // Forward declaration - RecordingLog::Snapshot will be defined in RecordingLog.h
 namespace RecordingLog {
@@ -46,7 +47,7 @@ public:
         std::int64_t correlationId,
         std::int64_t recordingId,
         std::int64_t position,
-        archive::codecs::RecordingSignal signal);
+        RecordingSignal signal);
 
     bool isComplete() const;
 
@@ -121,7 +122,7 @@ inline void SnapshotReplication::onSignal(
     std::int64_t correlationId,
     std::int64_t recordingId,
     std::int64_t position,
-    archive::codecs::RecordingSignal signal)
+    RecordingSignal signal)
 {
     m_multipleRecordingReplication->onSignal(correlationId, recordingId, position, signal);
 }

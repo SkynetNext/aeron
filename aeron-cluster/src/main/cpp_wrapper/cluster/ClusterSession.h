@@ -28,6 +28,7 @@
 #include "util/CloseHelper.h"
 #include "util/BitUtil.h"
 #include "util/StringUtil.h"
+#include "util/ExpandableArrayBuffer.h"
 
 namespace aeron { namespace cluster {
 
@@ -75,6 +76,39 @@ public:
     static constexpr std::int32_t MAX_ENCODED_PRINCIPAL_LENGTH = 4 * 1024;
     static constexpr std::int32_t MAX_ENCODED_MEMBERSHIP_QUERY_LENGTH = 4 * 1024;
 
+    /**
+     * Action type for a cluster session (Java-style enum pattern).
+     * This provides ClusterSession::Action::BACKUP.name() style API.
+     */
+    struct ActionType
+    {
+        ClusterSessionAction value;
+        
+        ActionType(ClusterSessionAction v) : value(v) {}
+        
+        std::string name() const
+        {
+            switch (value)
+            {
+                case ClusterSessionAction::CLIENT: return "CLIENT";
+                case ClusterSessionAction::BACKUP: return "BACKUP";
+                case ClusterSessionAction::HEARTBEAT: return "HEARTBEAT";
+                case ClusterSessionAction::STANDBY_SNAPSHOT: return "STANDBY_SNAPSHOT";
+                default: return "UNKNOWN";
+            }
+        }
+        
+        operator ClusterSessionAction() const { return value; }
+    };
+    
+    struct Action
+    {
+        static const ActionType CLIENT;
+        static const ActionType BACKUP;
+        static const ActionType HEARTBEAT;
+        static const ActionType STANDBY_SNAPSHOT;
+    };
+
     ClusterSession(
         std::int32_t clusterMemberId,
         std::int64_t sessionId,
@@ -112,7 +146,7 @@ public:
 
     void resetCloseReason();
 
-    void asyncConnect(std::shared_ptr<Aeron> aeron, AtomicBuffer& tempBuffer, std::int32_t clusterId);
+    void asyncConnect(std::shared_ptr<Aeron> aeron, util::ExpandableArrayBuffer& tempBuffer, std::int32_t clusterId);
 
     void connect(
         const exception_handler_t& errorHandler,
@@ -227,6 +261,12 @@ private:
     std::shared_ptr<void> m_requestInput;
 };
 
+// Static member definitions for ClusterSession::Action
+inline const ClusterSession::ActionType ClusterSession::Action::CLIENT{ClusterSessionAction::CLIENT};
+inline const ClusterSession::ActionType ClusterSession::Action::BACKUP{ClusterSessionAction::BACKUP};
+inline const ClusterSession::ActionType ClusterSession::Action::HEARTBEAT{ClusterSessionAction::HEARTBEAT};
+inline const ClusterSession::ActionType ClusterSession::Action::STANDBY_SNAPSHOT{ClusterSessionAction::STANDBY_SNAPSHOT};
+
 // Implementation
 
 inline ClusterSession::ClusterSession(
@@ -336,10 +376,12 @@ inline void ClusterSession::resetCloseReason()
 
 inline void ClusterSession::asyncConnect(
     std::shared_ptr<Aeron> aeron,
-    AtomicBuffer& tempBuffer,
+    util::ExpandableArrayBuffer& tempBuffer,
     std::int32_t clusterId)
 {
-    m_counterRegistrationId = addSessionCounter(aeron, tempBuffer, clusterId);
+    // Create an AtomicBuffer wrapper around the expandable buffer's data
+    AtomicBuffer atomicBuffer(tempBuffer.buffer(), tempBuffer.capacity());
+    m_counterRegistrationId = addSessionCounter(aeron, atomicBuffer, clusterId);
     m_responsePublicationId = aeron->addPublication(m_responseChannel, m_responseStreamId);
 }
 

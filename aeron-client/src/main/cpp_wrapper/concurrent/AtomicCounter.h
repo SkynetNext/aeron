@@ -21,111 +21,96 @@
 
 #include "aeronc.h"
 
-#include "util/Index.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/CountersReader.h"
+#include "util/Index.h"
 
-namespace aeron { namespace concurrent {
 
-class AtomicCounter
-{
+namespace aeron {
+namespace concurrent {
+
+class AtomicCounter {
 public:
-    explicit AtomicCounter(aeron_counter_t *counter) : m_counter(counter), m_ptr(aeron_counter_addr(counter))
-    {
-        aeron_counter_constants(m_counter, &m_constants);
-    }
+  explicit AtomicCounter(aeron_counter_t *counter)
+      : m_counter(counter), m_ptr(aeron_counter_addr(counter)) {
+    aeron_counter_constants(m_counter, &m_constants);
+  }
 
-    AtomicCounter(std::int64_t *ptr, std::int64_t registrationId, std::int32_t counterId) :
-        m_ptr(ptr)
-    {
-        m_constants.registration_id = registrationId;
-        m_constants.counter_id = counterId;
-    }
+  AtomicCounter(std::int64_t *ptr, std::int64_t registrationId,
+                std::int32_t counterId)
+      : m_ptr(ptr) {
+    m_constants.registration_id = registrationId;
+    m_constants.counter_id = counterId;
+  }
 
-    ~AtomicCounter()
-    {
-        if (nullptr != m_counter)
-        {
-            aeron_counter_close(m_counter, nullptr, nullptr);
-        }
+  ~AtomicCounter() {
+    if (nullptr != m_counter) {
+      aeron_counter_close(m_counter, nullptr, nullptr);
     }
+  }
 
-    inline std::int32_t id() const
-    {
-        return m_constants.counter_id;
-    }
+  inline std::int32_t id() const { return m_constants.counter_id; }
 
-    inline void increment()
-    {
-        atomic::getAndAddInt64(m_ptr, 1);
-    }
+  inline void increment() { atomic::getAndAddInt64(m_ptr, 1); }
 
-    inline void incrementOrdered()
-    {
-        std::int64_t currentValue = *m_ptr;
-        atomic::putInt64Ordered(m_ptr, currentValue + 1);
-    }
+  inline void incrementOrdered() {
+    std::int64_t currentValue = *m_ptr;
+    atomic::putInt64Ordered(m_ptr, currentValue + 1);
+  }
 
-    inline void set(std::int64_t value)
-    {
-        atomic::putInt64Atomic(m_ptr, value);
-    }
+  // Java compatibility: incrementRelease is equivalent to incrementOrdered
+  inline void incrementRelease() {
+    std::int64_t currentValue = *m_ptr;
+    atomic::putInt64Ordered(m_ptr, currentValue + 1);
+  }
 
-    inline void setOrdered(std::int64_t value)
-    {
-        atomic::putInt64Ordered(m_ptr, value);
-    }
+  inline void set(std::int64_t value) { atomic::putInt64Atomic(m_ptr, value); }
 
-    inline void setWeak(std::int64_t value)
-    {
-        *m_ptr = value;
-    }
+  inline void setOrdered(std::int64_t value) {
+    atomic::putInt64Ordered(m_ptr, value);
+  }
 
-    inline std::int64_t getAndAdd(std::int64_t value)
-    {
-        return atomic::getAndAddInt64(m_ptr, value);
-    }
+  // Java compatibility: setRelease is equivalent to setOrdered
+  inline void setRelease(std::int64_t value) {
+    atomic::putInt64Ordered(m_ptr, value);
+  }
 
-    inline std::int64_t getAndAddOrdered(std::int64_t increment)
-    {
-        std::int64_t currentValue = *m_ptr;
-        atomic::putInt64Ordered(m_ptr, currentValue + increment);
-        return currentValue;
-    }
+  inline void setWeak(std::int64_t value) { *m_ptr = value; }
 
-    inline std::int64_t getAndSet(std::int64_t value)
-    {
-        return atomic::xchg(m_ptr, value);
-    }
+  inline std::int64_t getAndAdd(std::int64_t value) {
+    return atomic::getAndAddInt64(m_ptr, value);
+  }
 
-    inline bool compareAndSet(std::int64_t expectedValue, std::int64_t updateValue)
-    {
-        std::int64_t original = atomic::cmpxchg(m_ptr, expectedValue, updateValue);
-        return original == expectedValue;
-    }
+  inline std::int64_t getAndAddOrdered(std::int64_t increment) {
+    std::int64_t currentValue = *m_ptr;
+    atomic::putInt64Ordered(m_ptr, currentValue + increment);
+    return currentValue;
+  }
 
-    inline std::int64_t get() const
-    {
-        return atomic::getInt64Volatile(m_ptr);
-    }
+  inline std::int64_t getAndSet(std::int64_t value) {
+    return atomic::xchg(m_ptr, value);
+  }
 
-    inline std::int64_t getWeak() const
-    {
-        return *m_ptr;
-    }
+  inline bool compareAndSet(std::int64_t expectedValue,
+                            std::int64_t updateValue) {
+    std::int64_t original = atomic::cmpxchg(m_ptr, expectedValue, updateValue);
+    return original == expectedValue;
+  }
+
+  inline std::int64_t get() const { return atomic::getInt64Volatile(m_ptr); }
+
+  inline std::int64_t getWeak() const { return *m_ptr; }
 
 protected:
-    aeron_counter_t *counter() const
-    {
-        return m_counter;
-    }
+  aeron_counter_t *counter() const { return m_counter; }
 
 private:
-    aeron_counter_t *m_counter = nullptr;
-    std::int64_t *m_ptr = nullptr;
-    aeron_counter_constants_t m_constants = {};
+  aeron_counter_t *m_counter = nullptr;
+  std::int64_t *m_ptr = nullptr;
+  aeron_counter_constants_t m_constants = {};
 };
 
-}}
+} // namespace concurrent
+} // namespace aeron
 
 #endif

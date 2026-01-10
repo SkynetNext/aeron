@@ -18,41 +18,33 @@
 #define AERON_BUSY_SPIN_IDLE_STRATEGY_H
 
 #include "concurrent/Atomic64.h"
+#include "concurrent/IdleStrategy.h"
 
-namespace aeron { namespace concurrent {
+namespace aeron {
+namespace concurrent {
 
-class BusySpinIdleStrategy
-{
+class BusySpinIdleStrategy : public IdleStrategy {
 public:
-    BusySpinIdleStrategy() = default;
+  BusySpinIdleStrategy() = default;
 
-    inline void idle(int workCount)
-    {
-        if (workCount > 0)
-        {
-            return;
-        }
-
-        pause();
+  inline void idle(int workCount) override {
+    if (workCount > 0) {
+      return;
     }
 
-    inline void reset()
-    {
-    }
+    pause();
+  }
 
-    inline void idle()
-    {
-        pause();
-    }
+  inline void reset() override {}
 
-    inline static void pause()
-    {
-        atomic::cpu_pause();
-    }
+  inline void idle() override { pause(); }
+
+  inline static void pause() { atomic::cpu_pause(); }
 
 private:
 };
 
-}}
+} // namespace concurrent
+} // namespace aeron
 
 #endif

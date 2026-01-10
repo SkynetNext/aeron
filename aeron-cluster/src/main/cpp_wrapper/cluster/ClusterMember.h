@@ -34,6 +34,11 @@ public:
   static std::vector<ClusterMember> EMPTY_MEMBERS;
 
   /**
+   * Default constructor for uninitialized member.
+   */
+  ClusterMember() : m_id(-1) {}
+
+  /**
    * Construct a new member of the cluster.
    */
   ClusterMember(std::int32_t id, const std::string &ingressEndpoint,

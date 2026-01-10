@@ -4,6 +4,11 @@
 
 本项目旨在将 Java 版本的 `aeron-cluster` **1:1 移植**到 C++ 版本，与 `aeron-client` 的 `cpp_wrapper` 代码组织、编译方式等保持一致。
 
+**重要背景**：
+- **aeron-cluster 的特殊性**: 官方 Aeron 仓库（https://github.com/aeron-io/aeron）**没有提供 C++ 版本的 cluster 实现**，只有 Java 版本。因此需要从 Java 版本进行完整的 1:1 翻译。
+- **aeron-client 等**: `aeron-client`、`aeron-archive` 等其他模块的 C++ wrapper 是**从官方仓库 fork 下来的**，已有成熟的实现可以参考。
+- **移植策略**: 由于 cluster 没有官方 C++ 实现，遇到编译错误、逻辑问题或不确定实现细节时，**必须严格参考 Java 源码进行 1:1 翻译**，缺少的功能需要补齐，确保行为一致。
+
 **仓库地址**: https://github.com/SkynetNext/aeron
 
 ## ⚠️ 重要原则：1:1 翻译
@@ -13,6 +18,7 @@
 - **API 对等**: C++ API 设计要与 Java API 保持功能对等（允许 C++ 风格的命名和用法）
 - **行为一致**: C++ 版本的行为要与 Java 版本保持一致
 - **协议兼容**: 生成的 codecs 必须与 Java 版本二进制兼容
+- **遇到问题优先参考 Java 实现**: 由于 cluster 没有官方 C++ 版本，遇到编译错误、逻辑问题、边界情况处理等任何不确定的地方，**必须严格参考 Java 源码**，进行 1:1 翻译。缺少的功能需要补齐，这样可以避免很多潜在问题。
 
 ## 目标
 
@@ -27,7 +33,7 @@
 
 ```
 aeron-client/src/main/cpp_wrapper/
-├── CMakeLists.txt              # Header-only INTERFACE 库配置
+├── CMakeLists.txt              # CMake 库配置
 ├── Aeron.h                     # 主入口类
 ├── Publication.h
 ├── Subscription.h
@@ -45,7 +51,6 @@ aeron-client/src/main/cpp_wrapper/
 ```
 
 **关键特性**:
-- **Header-only 库**: 使用 CMake `INTERFACE` 库，所有代码在头文件中
 - **C++20 标准**: 使用 C++20 特性
 - **异常处理**: 使用 `std::exception` 及其派生类（`util/Exceptions.h`）
 - **命名空间**: 使用 `namespace aeron`
@@ -76,7 +81,6 @@ aeron-archive/src/main/cpp_wrapper/
 
 ### 2. 代码风格
 
-- **Header-only**: 所有实现代码在 `.h` 文件中
 - **命名规范**: 
   - 类名：PascalCase（如 `AeronCluster`）
   - 成员变量：`m_` 前缀（如 `m_context`）
@@ -85,6 +89,7 @@ aeron-archive/src/main/cpp_wrapper/
 - **异常**: 使用 `aeron::util::Exceptions.h` 中定义的异常类型
 - **代码注释**: **必须使用英文**（与 `aeron-client` 保持一致）
 - **文档语言**: 所有技术文档、API 文档、README 等**必须使用英文**
+- **实现方式**: 参考 `aeron-client` 的实际代码组织方式（可能包含 `.h` 和 `.cpp` 文件）
 
 ### 3. 依赖关系
 
@@ -123,10 +128,9 @@ aeron-cluster/src/main/cpp_wrapper/
 
 #### 1.2 CMakeLists.txt 配置
 
-参考 `aeron-archive/src/main/cpp_wrapper/CMakeLists.txt`，创建类似的配置：
+参考 `aeron-archive/src/main/cpp_wrapper/CMakeLists.txt` 和 `aeron-client/src/main/cpp_wrapper/CMakeLists.txt`，创建类似的配置：
 
 ```cmake
-# Header-only library
 add_library(aeron_cluster_wrapper INTERFACE)
 add_library(aeron::aeron_cluster_wrapper ALIAS aeron_cluster_wrapper)
 
@@ -143,6 +147,8 @@ target_link_libraries(aeron_cluster_wrapper
     ${CMAKE_THREAD_LIBS_INIT}
 )
 ```
+
+**注意**: 具体实现方式（header-only 或包含 `.cpp` 文件）需要参考 `aeron-client` 的实际代码组织方式。
 
 #### 1.3 根 CMakeLists.txt 集成
 
@@ -391,12 +397,13 @@ cluster->close();
 
 ## 注意事项
 
-1. **保持一致性**: 严格遵循 `aeron-client` 的代码风格和组织方式
-2. **性能优先**: 确保 C++ 版本性能不劣于 Java 版本
-3. **向后兼容**: API 设计时考虑未来扩展
-4. **文档完善**: 及时更新文档和示例代码
-5. **测试覆盖**: 确保关键功能有充分的测试覆盖
-6. **语言规范**: 
+1. **1:1 翻译优先**: 由于 cluster 没有官方 C++ 版本，遇到任何问题（编译错误、逻辑问题、边界情况等）时，**必须严格参考 Java 源码进行 1:1 翻译**，缺少的功能需要补齐。这样可以避免很多潜在问题。
+2. **保持一致性**: 严格遵循 `aeron-client` 的代码风格和组织方式（`aeron-client` 是从官方 fork 的，已有成熟实现）
+3. **性能优先**: 确保 C++ 版本性能不劣于 Java 版本
+4. **向后兼容**: API 设计时考虑未来扩展
+5. **文档完善**: 及时更新文档和示例代码
+6. **测试覆盖**: 确保关键功能有充分的测试覆盖
+7. **语言规范**: 
    - **代码注释必须使用英文**（与 `aeron-client` 保持一致）
    - **所有技术文档、API 文档、README 等必须使用英文**
    - 仅此移植计划文档（CPP_PORT_PLAN.md）使用中文
