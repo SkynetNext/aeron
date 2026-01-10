@@ -1,6 +1,6 @@
 #pragma once
 
-#include "client/ClusterExceptions.h"
+#include "cluster/client/ClusterExceptions.h"
 #include "util/BitUtil.h"
 #include "util/Exceptions.h"
 #include <cstdint>
