@@ -16,7 +16,7 @@
 #pragma once
 
 #include "Publication.h"
-#include "client/AeronCluster.h"
+#include "cluster/client/AeronCluster.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/logbuffer/BufferClaim.h"
 #include <string>

@@ -6,7 +6,7 @@
 #include "FragmentAssembler.h"
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/logbuffer/Header.h"
-#include "client/ClusterExceptions.h"
+#include "cluster/client/ClusterExceptions.h"
 #include "Cluster.h"
 #include "generated/aeron_cluster_codecs/MessageHeader.h"
 #include "generated/aeron_cluster_codecs/JoinLog.h"

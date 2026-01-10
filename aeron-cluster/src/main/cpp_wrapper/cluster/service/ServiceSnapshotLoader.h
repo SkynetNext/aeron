@@ -8,7 +8,7 @@
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/logbuffer/ControlledFragmentHandler.h"
 #include "concurrent/logbuffer/Header.h"
-#include "client/ClusterExceptions.h"
+#include "cluster/client/ClusterExceptions.h"
 #include "ClusterClock.h"
 #include "generated/aeron_cluster_codecs/MessageHeader.h"
 #include "generated/aeron_cluster_codecs/SnapshotMarker.h"

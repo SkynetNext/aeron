@@ -23,7 +23,7 @@
 #include "concurrent/CountersReader.h"
 #include "AeronCounters.h"
 #include "util/BitUtil.h"
-#include "client/ClusterExceptions.h"
+#include "cluster/client/ClusterExceptions.h"
 
 namespace aeron { namespace cluster { namespace service
 {
