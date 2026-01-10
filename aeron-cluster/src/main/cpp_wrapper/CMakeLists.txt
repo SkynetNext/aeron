@@ -96,6 +96,14 @@ set(SOURCES
 # Regular library with .cpp implementation files
 add_library(aeron_cluster_wrapper ${SOURCES})
 add_library(aeron::aeron_cluster_wrapper ALIAS aeron_cluster_wrapper)
+
+# Set C++20 standard for aeron-cluster 
+set_target_properties(aeron_cluster_wrapper PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
 target_include_directories(aeron_cluster_wrapper
     PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>"

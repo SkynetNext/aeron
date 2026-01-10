@@ -45,6 +45,14 @@ function(aeron_cluster_wrapper_test name file)
     set(wrapper_name "${name}W")
     add_executable(${wrapper_name} ${file} ${TEST_HEADERS})
     add_dependencies(${wrapper_name} gmock aeron_static aeron_driver_static cluster_cpp_codecs archive_cpp_codecs)
+    
+    # Set C++20 standard for tests 
+    set_target_properties(${wrapper_name} PROPERTIES
+        CXX_STANDARD 20
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    
     # Link to aeron_cluster_wrapper first to inherit its include directories (including generated codecs)
     target_link_libraries(${wrapper_name} 
         aeron_cluster_wrapper 

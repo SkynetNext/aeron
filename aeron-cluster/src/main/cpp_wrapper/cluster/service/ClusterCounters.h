@@ -23,7 +23,6 @@
 #include "concurrent/CountersReader.h"
 #include <string>
 
-
 namespace aeron {
 namespace cluster {
 namespace service {
