@@ -266,27 +266,161 @@ TEST_F(AeronClusterAsyncConnectTest, shouldConnectViaIngressChannel) {
   m_context->isIngressExclusive(false);
 
   const std::int64_t deadlineNs = nanoClock() + std::chrono::hours(1).count();
-  (void)deadlineNs; // Used in Java for timeout checks
   auto asyncConnect = AeronCluster::asyncConnect(m_context);
 
-  // Note: This test requires full async connection flow with:
-  // 1. Subscription creation
-  // 2. Publication creation
-  // 3. Publication connection
-  // 4. Message sending
-  // 5. Response polling
-  // 6. Connection conclusion
+  // Step 1: Create egress subscription
+  int maxPolls = 100;
+  while (asyncConnect->state() ==
+             AeronCluster::AsyncConnect::State::CREATE_EGRESS_SUBSCRIPTION &&
+         maxPolls-- > 0) {
+    EXPECT_EQ(nullptr, asyncConnect->poll());
+    if (m_aeron->usesAgentInvoker()) {
+      m_aeron->conductorAgentInvoker().invoke();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_GT(maxPolls, 0) << "Timeout waiting for subscription creation";
+  EXPECT_EQ(AeronCluster::AsyncConnect::State::CREATE_INGRESS_PUBLICATIONS,
+            asyncConnect->state());
 
-  // For now, we test the basic structure
+  // Step 2: Create ingress publication
+  maxPolls = 100;
+  while (asyncConnect->state() ==
+             AeronCluster::AsyncConnect::State::CREATE_INGRESS_PUBLICATIONS &&
+         maxPolls-- > 0) {
+    EXPECT_EQ(nullptr, asyncConnect->poll());
+    if (m_aeron->usesAgentInvoker()) {
+      m_aeron->conductorAgentInvoker().invoke();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_GT(maxPolls, 0) << "Timeout waiting for publication creation";
+  EXPECT_EQ(AeronCluster::AsyncConnect::State::AWAIT_PUBLICATION_CONNECTED,
+            asyncConnect->state());
+
+  // Step 3: Wait for publication to connect
+  maxPolls = 100;
+  while (asyncConnect->state() ==
+             AeronCluster::AsyncConnect::State::AWAIT_PUBLICATION_CONNECTED &&
+         maxPolls-- > 0) {
+    EXPECT_EQ(nullptr, asyncConnect->poll());
+    if (m_aeron->usesAgentInvoker()) {
+      m_aeron->conductorAgentInvoker().invoke();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_GT(maxPolls, 0) << "Timeout waiting for publication connection";
+  EXPECT_EQ(AeronCluster::AsyncConnect::State::SEND_MESSAGE,
+            asyncConnect->state());
+
+  // Step 4: Send connect message (poll() will send it)
   EXPECT_EQ(nullptr, asyncConnect->poll());
+  EXPECT_EQ(AeronCluster::AsyncConnect::State::POLL_RESPONSE,
+            asyncConnect->state());
 
-  // Note: Full implementation would:
-  // - Create subscription
-  // - Create publication
-  // - Wait for connection
-  // - Send connect message
-  // - Poll for response
-  // - Verify AeronCluster instance is returned
+  // Step 5: Create a publication to send SessionEvent response to egress channel
+  // Get the egress channel from the context
+  const std::string egressChannel = m_context->egressChannel();
+  const std::int32_t egressStreamId = m_context->egressStreamId();
 
+  // Create a publication to send response (this simulates the cluster sending
+  // SessionEvent)
+  std::int64_t responsePubId =
+      m_aeron->addPublication(egressChannel, egressStreamId);
+  std::shared_ptr<Publication> responsePublication =
+      m_aeron->findPublication(responsePubId);
+
+  // Wait for publication to be available
+  maxPolls = 100;
+  while (!responsePublication && maxPolls-- > 0) {
+    if (m_aeron->usesAgentInvoker()) {
+      m_aeron->conductorAgentInvoker().invoke();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    responsePublication = m_aeron->findPublication(responsePubId);
+  }
+  EXPECT_NE(nullptr, responsePublication) << "Failed to create response publication";
+
+  // Wait for publication to connect
+  maxPolls = 100;
+  while (!responsePublication->isConnected() && maxPolls-- > 0) {
+    if (m_aeron->usesAgentInvoker()) {
+      m_aeron->conductorAgentInvoker().invoke();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_TRUE(responsePublication->isConnected())
+      << "Response publication not connected";
+
+  // Step 6: Send SessionEvent response
+  // We need to get the correlationId from the connect request, but since we
+  // can't easily access it, we'll use a known value for testing
+  // In a real scenario, the cluster would extract this from the connect request
+  const std::int64_t testCorrelationId = 1;
+  const std::int64_t testClusterSessionId = 888;
+  const std::int64_t testLeadershipTermId = 5;
+  const std::int32_t testLeaderMemberId = 2;
+
+  std::vector<std::uint8_t> bufferData(256, 0);
+  AtomicBuffer buffer(bufferData.data(),
+                      static_cast<util::index_t>(bufferData.size()));
+
+  MessageHeader messageHeader;
+  messageHeader.wrap(reinterpret_cast<char *>(buffer.buffer()), 0,
+                      MessageHeader::sbeSchemaVersion(), buffer.capacity());
+  messageHeader.blockLength(SessionEvent::sbeBlockLength());
+  messageHeader.templateId(SessionEvent::sbeTemplateId());
+  messageHeader.schemaId(SessionEvent::sbeSchemaId());
+  messageHeader.version(SessionEvent::sbeSchemaVersion());
+
+  SessionEvent sessionEvent;
+  const util::index_t headerLength = MessageHeader::encodedLength();
+  sessionEvent.wrapForEncode(
+      reinterpret_cast<char *>(buffer.buffer()),
+      headerLength, buffer.capacity());
+  sessionEvent.clusterSessionId(testClusterSessionId);
+  sessionEvent.correlationId(testCorrelationId);
+  sessionEvent.leadershipTermId(testLeadershipTermId);
+  sessionEvent.leaderMemberId(testLeaderMemberId);
+  sessionEvent.code(EventCode::Value::OK);
+  sessionEvent.version(AeronCluster::Configuration::PROTOCOL_SEMANTIC_VERSION);
+  sessionEvent.leaderHeartbeatTimeoutNs(
+      SessionEvent::leaderHeartbeatTimeoutNsNullValue());
+  const std::string detail = "you are now connected";
+  sessionEvent.putDetail(detail.data(),
+                          static_cast<std::uint32_t>(detail.length()));
+
+  const util::index_t messageLength =
+      headerLength + sessionEvent.encodedLength();
+
+  // Send the response
+  std::int64_t position = responsePublication->offer(buffer, 0, messageLength);
+  EXPECT_GT(position, 0) << "Failed to send SessionEvent response";
+
+  // Step 7: Poll for response
+  maxPolls = 100;
+  std::shared_ptr<AeronCluster> aeronCluster;
+  while (!(aeronCluster = asyncConnect->poll()) && maxPolls-- > 0) {
+    if (m_aeron->usesAgentInvoker()) {
+      m_aeron->conductorAgentInvoker().invoke();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+
+  // Verify AeronCluster instance is returned
+  EXPECT_NE(nullptr, aeronCluster) << "Failed to get AeronCluster instance";
+  if (aeronCluster) {
+    EXPECT_EQ(testLeadershipTermId, aeronCluster->leadershipTermId());
+    EXPECT_EQ(testLeaderMemberId, aeronCluster->leaderMemberId());
+    EXPECT_EQ(testClusterSessionId, aeronCluster->clusterSessionId());
+    EXPECT_FALSE(aeronCluster->isClosed());
+
+    // Close the cluster
+    aeronCluster->close();
+    EXPECT_TRUE(aeronCluster->isClosed());
+  }
+
+  // Cleanup
+  responsePublication->close();
   asyncConnect->close();
 }

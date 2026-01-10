@@ -25,13 +25,11 @@
 #include <unordered_map>
 #include <vector>
 
-
 #include "concurrent/AtomicBuffer.h"
 #include "concurrent/logbuffer/BufferClaim.h"
 #include "concurrent/status/StatusIndicatorReader.h"
 #include "concurrent/status/UnsafeBufferPosition.h"
 #include "util/Exceptions.h"
-
 
 #include "aeronc.h"
 
