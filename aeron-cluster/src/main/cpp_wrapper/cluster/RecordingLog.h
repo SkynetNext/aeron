@@ -657,7 +657,8 @@ inline void RecordingLog::reload() {
         const std::int32_t remaining = totalBytes - consumed;
         std::memmove(m_byteBuffer.data(), m_byteBuffer.data() + consumed,
                      static_cast<std::size_t>(remaining));
-        bufferOffset = MAX_ENTRY_LENGTH - remaining;
+        bufferOffset = remaining; // Remaining data is now at the beginning, so
+                                  // offset is remaining
       } else {
         bufferOffset = 0;
       }
