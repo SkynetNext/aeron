@@ -603,9 +603,14 @@ inline void RecordingLog::reload() {
   }
 
   // Java version: fileChannel.read(byteBuffer, filePosition) reads from
-  // filePosition C++ version: use seekg to position at filePosition, then read
+  // filePosition byteBuffer.flip() sets limit to position, position to 0
+  // byteBuffer.compact() moves remaining data to beginning
+  // C++ version: simulate this behavior
+  m_fileStream.seekg(0, std::ios::beg);
   std::int64_t filePosition = 0;
   std::int64_t consumePosition = 0;
+  std::int32_t bufferOffset =
+      0; // Offset in buffer where unprocessed data starts
 
   // Ensure m_buffer wraps the full m_byteBuffer (like Java version)
   // m_buffer should always have MAX_ENTRY_LENGTH capacity
@@ -613,21 +618,44 @@ inline void RecordingLog::reload() {
 
   while (true) {
     // Java version: fileChannel.read(byteBuffer, filePosition) reads from
-    // filePosition C++ version: seek to filePosition, then read
-    m_fileStream.seekg(filePosition, std::ios::beg);
-    m_fileStream.read(reinterpret_cast<char *>(m_byteBuffer.data()),
-                      MAX_ENTRY_LENGTH);
-    const std::streamsize bytesRead = m_fileStream.gcount();
+    // filePosition If there's remaining data from previous read, compact it
+    // first
+    if (bufferOffset > 0) {
+      // Move remaining data to beginning (like byteBuffer.compact())
+      const std::int32_t remaining = MAX_ENTRY_LENGTH - bufferOffset;
+      std::memmove(m_byteBuffer.data(), m_byteBuffer.data() + bufferOffset,
+                   static_cast<std::size_t>(remaining));
+      bufferOffset = 0;
+    }
 
-    if (bytesRead > 0) {
+    // Read new data
+    m_fileStream.seekg(filePosition, std::ios::beg);
+    const std::int32_t availableSpace = MAX_ENTRY_LENGTH - bufferOffset;
+    m_fileStream.read(
+        reinterpret_cast<char *>(m_byteBuffer.data() + bufferOffset),
+        availableSpace);
+    const std::streamsize bytesRead = m_fileStream.gcount();
+    const std::int32_t totalBytes =
+        bufferOffset + static_cast<std::int32_t>(bytesRead);
+
+    if (totalBytes > 0) {
       // In Java version, byteBuffer.flip() sets limit to position, position to
       // 0 Then captureEntriesFromBuffer uses byteBuffer.limit() as the length
-      // C++ version: pass bytesRead as the length limit, but m_buffer still has
-      // full capacity
-      consumePosition += captureEntriesFromBuffer(
-          consumePosition, static_cast<std::int32_t>(bytesRead), m_buffer,
-          m_entriesCache);
+      // C++ version: pass totalBytes as the length limit, but m_buffer still
+      // has full capacity
+      const std::int32_t consumed = captureEntriesFromBuffer(
+          consumePosition, totalBytes, m_buffer, m_entriesCache);
+
+      // Calculate remaining unprocessed data
+      // Remaining data starts at 'consumed' position in buffer
+      bufferOffset = consumed;
+      consumePosition += consumed;
       filePosition += bytesRead;
+
+      // If no data was consumed and no new data was read, we're done
+      if (consumed == 0 && bytesRead == 0) {
+        break;
+      }
     } else {
       break;
     }
@@ -894,6 +922,13 @@ inline void RecordingLog::persistToStorage(std::int64_t entryPosition,
   m_fileStream.seekp(position);
   m_fileStream.write(reinterpret_cast<const char *>(m_buffer.buffer()), length);
   m_fileStream.flush(); // Ensure data is written to disk
+
+  // Java version: checks if length != fileChannel.write(...)
+  // C++ version: check if write was successful
+  if (static_cast<std::streamsize>(length) != m_fileStream.tellp() - position) {
+    throw client::ClusterException("failed to write field atomically",
+                                   SOURCEINFO);
+  }
 
   if (!m_fileStream.good()) {
     throw client::ClusterException("failed to write field atomically",
