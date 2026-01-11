@@ -25,7 +25,6 @@
 #include "util/CloseHelper.h"
 #include "util/Exceptions.h"
 
-
 namespace aeron {
 namespace cluster {
 // Avoid using namespace directives in headers to prevent namespace pollution in
@@ -217,8 +216,99 @@ inline ControlledPollAction LogAdapter::onFragment(AtomicBuffer &buffer,
   return action;
 }
 
-// Implementation moved to ConsensusModuleAgent.h to avoid circular dependency
-// inline ControlledPollAction LogAdapter::onMessage(...)
+inline ControlledPollAction LogAdapter::onMessage(AtomicBuffer &buffer,
+                                                  std::int32_t offset,
+                                                  std::int32_t length,
+                                                  Header &header) {
+  m_messageHeaderDecoder.wrap(buffer, offset);
+
+  const std::int32_t schemaId = m_messageHeaderDecoder.schemaId();
+  const std::int32_t templateId = m_messageHeaderDecoder.templateId();
+  const std::int32_t actingVersion = m_messageHeaderDecoder.version();
+  const std::int32_t actingBlockLength = m_messageHeaderDecoder.blockLength();
+
+  if (schemaId != MessageHeader::SCHEMA_ID) {
+    return m_consensusModuleAgent.onReplayExtensionMessage(
+        actingBlockLength, templateId, schemaId, actingVersion, buffer, offset,
+        length, header);
+  }
+
+  switch (templateId) {
+  case SessionMessageHeader::TEMPLATE_ID:
+    m_sessionHeaderDecoder.wrap(buffer, offset + MessageHeader::ENCODED_LENGTH,
+                                actingBlockLength, actingVersion);
+
+    m_consensusModuleAgent.onReplaySessionMessage(
+        m_sessionHeaderDecoder.clusterSessionId(),
+        m_sessionHeaderDecoder.timestamp());
+
+    return ControlledPollAction::CONTINUE;
+
+  case TimerEvent::TEMPLATE_ID:
+    m_timerEventDecoder.wrap(buffer, offset + MessageHeader::ENCODED_LENGTH,
+                             actingBlockLength, actingVersion);
+
+    m_consensusModuleAgent.onReplayTimerEvent(
+        m_timerEventDecoder.correlationId());
+    break;
+
+  case SessionOpenEvent::TEMPLATE_ID:
+    m_sessionOpenEventDecoder.wrap(buffer,
+                                   offset + MessageHeader::ENCODED_LENGTH,
+                                   actingBlockLength, actingVersion);
+
+    m_consensusModuleAgent.onReplaySessionOpen(
+        header.position(), m_sessionOpenEventDecoder.correlationId(),
+        m_sessionOpenEventDecoder.clusterSessionId(),
+        m_sessionOpenEventDecoder.timestamp(),
+        m_sessionOpenEventDecoder.responseStreamId(),
+        m_sessionOpenEventDecoder.responseChannel());
+    break;
+
+  case SessionCloseEvent::TEMPLATE_ID:
+    m_sessionCloseEventDecoder.wrap(buffer,
+                                    offset + MessageHeader::ENCODED_LENGTH,
+                                    actingBlockLength, actingVersion);
+
+    m_consensusModuleAgent.onReplaySessionClose(
+        m_sessionCloseEventDecoder.clusterSessionId(),
+        m_sessionCloseEventDecoder.closeReason());
+    break;
+
+  case ClusterActionRequest::TEMPLATE_ID:
+    m_clusterActionRequestDecoder.wrap(buffer,
+                                       offset + MessageHeader::ENCODED_LENGTH,
+                                       actingBlockLength, actingVersion);
+
+    const std::int32_t flags = (m_clusterActionRequestDecoder.flags() !=
+                                ClusterActionRequest::flagsNullValue())
+                                   ? m_clusterActionRequestDecoder.flags()
+                                   : 0; // CLUSTER_ACTION_FLAGS_DEFAULT = 0
+
+    m_consensusModuleAgent.onReplayClusterAction(
+        m_clusterActionRequestDecoder.leadershipTermId(),
+        m_clusterActionRequestDecoder.logPosition(),
+        m_clusterActionRequestDecoder.timestamp(),
+        m_clusterActionRequestDecoder.action(), flags);
+    return ControlledPollAction::BREAK;
+
+  case NewLeadershipTermEvent::TEMPLATE_ID:
+    m_newLeadershipTermEventDecoder.wrap(buffer,
+                                         offset + MessageHeader::ENCODED_LENGTH,
+                                         actingBlockLength, actingVersion);
+
+    m_consensusModuleAgent.onReplayNewLeadershipTermEvent(
+        m_newLeadershipTermEventDecoder.leadershipTermId(),
+        m_newLeadershipTermEventDecoder.logPosition(),
+        m_newLeadershipTermEventDecoder.timestamp(),
+        m_newLeadershipTermEventDecoder.termBaseLogPosition(),
+        ClusterClock::map(m_newLeadershipTermEventDecoder.timeUnit()),
+        m_newLeadershipTermEventDecoder.appVersion());
+    break;
+  }
+
+  return ControlledPollAction::CONTINUE;
+}
 
 } // namespace cluster
 } // namespace aeron

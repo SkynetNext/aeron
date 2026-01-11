@@ -44,7 +44,11 @@ include_directories(${ARCHIVE_CODEC_BINARY_DIR})
 function(aeron_cluster_wrapper_test name file)
     set(wrapper_name "${name}W")
     add_executable(${wrapper_name} ${file} ${TEST_HEADERS})
-    add_dependencies(${wrapper_name} gmock aeron_static aeron_driver_static cluster_cpp_codecs archive_cpp_codecs)
+    if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+        add_dependencies(${wrapper_name} gmock aeron_static aeron_driver_static cluster_cpp_codecs archive_cpp_codecs aeron_archive_c_client_static)
+    else()
+        add_dependencies(${wrapper_name} gmock aeron_static aeron_driver_static cluster_cpp_codecs archive_cpp_codecs aeron_archive_c_client)
+    endif()
     
     # Set C++20 standard for tests 
     set_target_properties(${wrapper_name} PROPERTIES
@@ -54,15 +58,29 @@ function(aeron_cluster_wrapper_test name file)
     )
     
     # Link to aeron_cluster_wrapper first to inherit its include directories (including generated codecs)
-    target_link_libraries(${wrapper_name} 
-        aeron_cluster_wrapper 
-        aeron_client_wrapper 
-        aeron_archive_wrapper
-        aeron_static 
-        aeron_driver_static 
-        gmock_main 
-        ${CMAKE_THREAD_LIBS_INIT} 
-        ${AERON_LIB_WINSOCK_LIBS})
+    if ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
+        target_link_libraries(${wrapper_name} 
+            aeron_cluster_wrapper 
+            aeron_client_wrapper 
+            aeron_archive_wrapper
+            aeron_archive_c_client_static
+            aeron_static 
+            aeron_driver_static 
+            gmock_main 
+            ${CMAKE_THREAD_LIBS_INIT} 
+            ${AERON_LIB_WINSOCK_LIBS})
+    else()
+        target_link_libraries(${wrapper_name} 
+            aeron_cluster_wrapper 
+            aeron_client_wrapper 
+            aeron_archive_wrapper
+            aeron_archive_c_client
+            aeron_static 
+            aeron_driver_static 
+            gmock_main 
+            ${CMAKE_THREAD_LIBS_INIT} 
+            ${AERON_LIB_WINSOCK_LIBS})
+    endif()
     target_compile_definitions(${wrapper_name} PUBLIC "_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING")
     
     # Add debug symbols and sanitizers for better crash debugging
