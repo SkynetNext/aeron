@@ -281,8 +281,8 @@ inline RecordingLog::Entry::Entry(
       entryIndex(entryIndex), isValid(isValid),
       archiveEndpoint(archiveEndpoint), position(position) {
   if (ENTRY_TYPE_STANDBY_SNAPSHOT == type && archiveEndpoint.empty()) {
-    throw ClusterException("Remote snapshots must has a valid endpoint",
-                           SOURCEINFO);
+    throw client::ClusterException("Remote snapshots must has a valid endpoint",
+                                   SOURCEINFO);
   }
 }
 
@@ -440,7 +440,7 @@ inline RecordingLog::RecordingLog(const std::string &parentDir, bool createNew)
 
   m_fileStream.open(m_logFilePath, mode);
   if (!m_fileStream.is_open()) {
-    throw ClusterException(
+    throw client::ClusterException(
         "Failed to open recording log file: " + m_logFilePath, SOURCEINFO);
   }
 
@@ -533,7 +533,7 @@ inline bool RecordingLog::matchesEntry(const Entry &entry,
 
 inline void RecordingLog::validateRecordingId(std::int64_t recordingId) {
   if (recordingId < 0) {
-    throw ClusterException(
+    throw client::ClusterException(
         "recordingId must be >= 0: " + std::to_string(recordingId), SOURCEINFO);
   }
 }
@@ -541,10 +541,11 @@ inline void RecordingLog::validateRecordingId(std::int64_t recordingId) {
 inline void RecordingLog::validateTermRecordingId(std::int64_t recordingId) {
   validateRecordingId(recordingId);
   if (m_termRecordingId != 0 && recordingId != m_termRecordingId) {
-    throw ClusterException("recordingId=" + std::to_string(recordingId) +
-                               " does not match termRecordingId=" +
-                               std::to_string(m_termRecordingId),
-                           SOURCEINFO);
+    throw client::ClusterException(
+        "recordingId=" + std::to_string(recordingId) +
+            " does not match termRecordingId=" +
+            std::to_string(m_termRecordingId),
+        SOURCEINFO);
   }
   m_termRecordingId = recordingId;
 }
@@ -636,9 +637,9 @@ RecordingLog::getTermEntry(std::int64_t leadershipTermId) const {
   if (it != m_cacheIndexByLeadershipTermIdMap.end()) {
     return m_entriesCache[it->second];
   }
-  throw ClusterException("unknown leadershipTermId=" +
-                             std::to_string(leadershipTermId),
-                         SOURCEINFO);
+  throw client::ClusterException("unknown leadershipTermId=" +
+                                     std::to_string(leadershipTermId),
+                                 SOURCEINFO);
 }
 
 inline RecordingLog::Entry *
@@ -666,9 +667,10 @@ inline void RecordingLog::appendTerm(std::int64_t recordingId,
   if (!m_entriesCache.empty()) {
     if (m_cacheIndexByLeadershipTermIdMap.find(leadershipTermId) !=
         m_cacheIndexByLeadershipTermIdMap.end()) {
-      throw ClusterException("duplicate TERM entry for leadershipTermId=" +
-                                 std::to_string(leadershipTermId),
-                             SOURCEINFO);
+      throw client::ClusterException(
+          "duplicate TERM entry for leadershipTermId=" +
+              std::to_string(leadershipTermId),
+          SOURCEINFO);
     }
 
     const std::int64_t previousLeadershipTermId = leadershipTermId - 1;
@@ -714,13 +716,13 @@ inline void RecordingLog::appendStandbySnapshot(
   validateRecordingId(recordingId);
 
   if (archiveEndpoint.empty()) {
-    throw ClusterException("Remote snapshots must have a valid endpoint",
-                           SOURCEINFO);
+    throw client::ClusterException(
+        "Remote snapshots must have a valid endpoint", SOURCEINFO);
   }
 
   if (static_cast<std::int32_t>(archiveEndpoint.length()) >
       MAX_ENDPOINT_LENGTH) {
-    throw ClusterException(
+    throw client::ClusterException(
         "Endpoint is too long: " + std::to_string(archiveEndpoint.length()) +
             " vs " + std::to_string(MAX_ENDPOINT_LENGTH),
         SOURCEINFO);
@@ -739,9 +741,9 @@ inline void RecordingLog::commitLogPosition(std::int64_t leadershipTermId,
                                             std::int64_t logPosition) {
   auto it = m_cacheIndexByLeadershipTermIdMap.find(leadershipTermId);
   if (it == m_cacheIndexByLeadershipTermIdMap.end()) {
-    throw ClusterException("unknown leadershipTermId=" +
-                               std::to_string(leadershipTermId),
-                           SOURCEINFO);
+    throw client::ClusterException("unknown leadershipTermId=" +
+                                       std::to_string(leadershipTermId),
+                                   SOURCEINFO);
   }
 
   Entry &entry = m_entriesCache[it->second];
@@ -836,7 +838,7 @@ inline void RecordingLog::persistToStorage(std::int64_t entryPosition,
                                            std::int32_t offset,
                                            std::int32_t length) {
   if (!m_fileStream.is_open()) {
-    throw ClusterException("File stream is not open", SOURCEINFO);
+    throw client::ClusterException("File stream is not open", SOURCEINFO);
   }
 
   const std::int64_t position = entryPosition + offset;
@@ -845,14 +847,15 @@ inline void RecordingLog::persistToStorage(std::int64_t entryPosition,
                      length);
 
   if (!m_fileStream.good()) {
-    throw ClusterException("failed to write field atomically", SOURCEINFO);
+    throw client::ClusterException("failed to write field atomically",
+                                   SOURCEINFO);
   }
 }
 
 inline void RecordingLog::persistToStorage(const Entry &entry,
                                            AtomicBuffer &directBuffer) {
   if (!m_fileStream.is_open()) {
-    throw ClusterException("File stream is not open", SOURCEINFO);
+    throw client::ClusterException("File stream is not open", SOURCEINFO);
   }
 
   std::int64_t entryPosition = entry.position;
@@ -871,7 +874,8 @@ inline void RecordingLog::persistToStorage(const Entry &entry,
                      entryLength);
 
   if (!m_fileStream.good()) {
-    throw ClusterException("failed to write entry atomically", SOURCEINFO);
+    throw client::ClusterException("failed to write entry atomically",
+                                   SOURCEINFO);
   }
 }
 
@@ -1002,7 +1006,7 @@ inline bool RecordingLog::invalidateLatestSnapshot() {
       if (entry.logPosition >= highLogPosition) {
         if (m_cacheIndexByLeadershipTermIdMap.find(entry.leadershipTermId) ==
             m_cacheIndexByLeadershipTermIdMap.end()) {
-          throw ClusterException(
+          throw client::ClusterException(
               "no matching term for snapshot: leadershipTermId=" +
                   std::to_string(entry.leadershipTermId),
               SOURCEINFO);
@@ -1053,8 +1057,8 @@ RecordingLog::getTermTimestamp(std::int64_t leadershipTermId) const {
 
 inline void RecordingLog::invalidateEntry(std::int32_t index) {
   if (index < 0 || index >= static_cast<std::int32_t>(m_entriesCache.size())) {
-    throw ClusterException("invalid entry index: " + std::to_string(index),
-                           SOURCEINFO);
+    throw client::ClusterException(
+        "invalid entry index: " + std::to_string(index), SOURCEINFO);
   }
 
   Entry invalidEntry = m_entriesCache[index].invalidate();
@@ -1089,8 +1093,8 @@ inline void RecordingLog::removeEntry(std::int64_t leadershipTermId,
   }
 
   if (!entryToRemove) {
-    throw ClusterException("unknown entry index: " + std::to_string(entryIndex),
-                           SOURCEINFO);
+    throw client::ClusterException(
+        "unknown entry index: " + std::to_string(entryIndex), SOURCEINFO);
   }
 
   m_buffer.putInt32(0, aeron::NULL_VALUE);
@@ -1143,16 +1147,16 @@ inline void RecordingLog::addSnapshots(std::vector<Snapshot> &snapshots,
 
   for (int i = 1; i <= serviceCount; i++) {
     if ((snapshotIndex - i) < 0) {
-      throw ClusterException("snapshot missing for service at index " +
-                                 std::to_string(i),
-                             SOURCEINFO);
+      throw client::ClusterException("snapshot missing for service at index " +
+                                         std::to_string(i),
+                                     SOURCEINFO);
     }
 
     const Entry &entry = entries[snapshotIndex - i];
     if (!isValidSnapshot(entry) || entry.serviceId != i) {
-      throw ClusterException("snapshot missing for service at index " +
-                                 std::to_string(i),
-                             SOURCEINFO);
+      throw client::ClusterException("snapshot missing for service at index " +
+                                         std::to_string(i),
+                                     SOURCEINFO);
     }
 
     snapshots.push_back(Snapshot(entry.recordingId, entry.leadershipTermId,
@@ -1169,6 +1173,12 @@ inline void RecordingLog::planRecovery(std::vector<Snapshot> &snapshots,
                                        std::int64_t replicatedRecordingId) {
   if (entries.empty()) {
     if (aeron::NULL_VALUE != replicatedRecordingId) {
+      if (!archive) {
+        throw client::ClusterException(
+            "archive is required for replicated recording id: " +
+                std::to_string(replicatedRecordingId),
+            SOURCEINFO);
+      }
       RecordingExtent recordingExtent;
       recording_descriptor_consumer_t consumer =
           [&recordingExtent](RecordingDescriptor &desc) {
@@ -1182,9 +1192,9 @@ inline void RecordingLog::planRecovery(std::vector<Snapshot> &snapshots,
                 desc.m_sourceIdentity);
           };
       if (archive->listRecording(replicatedRecordingId, consumer) == 0) {
-        throw ClusterException("unknown recording id: " +
-                                   std::to_string(replicatedRecordingId),
-                               SOURCEINFO);
+        throw client::ClusterException(
+            "unknown recording id: " + std::to_string(replicatedRecordingId),
+            SOURCEINFO);
       }
 
       logRef = std::make_shared<Log>(
@@ -1222,6 +1232,12 @@ inline void RecordingLog::planRecovery(std::vector<Snapshot> &snapshots,
 
   if (-1 != logIndex) {
     const Entry &entry = entries[logIndex];
+    if (!archive) {
+      throw client::ClusterException(
+          "archive is required for log recovery with recording id: " +
+              std::to_string(entry.recordingId),
+          SOURCEINFO);
+    }
     RecordingExtent recordingExtent;
     recording_descriptor_consumer_t consumer = [&recordingExtent](
                                                    RecordingDescriptor &desc) {
@@ -1234,9 +1250,9 @@ inline void RecordingLog::planRecovery(std::vector<Snapshot> &snapshots,
           desc.m_sourceIdentity);
     };
     if (archive->listRecording(entry.recordingId, consumer) == 0) {
-      throw ClusterException("unknown recording id: " +
-                                 std::to_string(entry.recordingId),
-                             SOURCEINFO);
+      throw client::ClusterException("unknown recording id: " +
+                                         std::to_string(entry.recordingId),
+                                     SOURCEINFO);
     }
 
     const std::int64_t startPosition = (-1 == snapshotIndex)
@@ -1298,15 +1314,15 @@ inline void RecordingLog::ensureCoherent(
 
   Entry *entry = findTermEntry(leadershipTermId);
   if (!entry) {
-    throw ClusterException("unknown leadershipTermId=" +
-                               std::to_string(leadershipTermId),
-                           SOURCEINFO);
+    throw client::ClusterException("unknown leadershipTermId=" +
+                                       std::to_string(leadershipTermId),
+                                   SOURCEINFO);
   }
 
   if (entry->recordingId != recordingId ||
       entry->termBaseLogPosition != termBaseLogPosition ||
       entry->logPosition != logPosition) {
-    throw ClusterException(
+    throw client::ClusterException(
         "recording log entry mismatch: expected recordingId=" +
             std::to_string(recordingId) +
             " termBaseLogPosition=" + std::to_string(termBaseLogPosition) +
