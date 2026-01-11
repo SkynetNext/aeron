@@ -1,18 +1,13 @@
 #pragma once
-#include "Aeron.h"
 #include "BufferBuilder.h"
 #include "Image.h"
 #include "Subscription.h"
-#include "client/ClusterExceptions.h"
-#include "service/ClusterClock.h"
 #include <memory>
 
 // ControlledFragmentHandler is replaced by ControlledPollAction in C++
 // #include "concurrent/logbuffer/ControlledFragmentHandler.h"
 #include "Context.h"
 #include "concurrent/AtomicBuffer.h"
-#include "concurrent/logbuffer/DataFrameHeader.h"
-#include "concurrent/logbuffer/FrameDescriptor.h"
 #include "concurrent/logbuffer/Header.h"
 #include "generated/aeron_cluster_codecs/ClusterActionRequest.h"
 #include "generated/aeron_cluster_codecs/MessageHeader.h"
@@ -21,8 +16,6 @@
 #include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
 #include "generated/aeron_cluster_codecs/SessionOpenEvent.h"
 #include "generated/aeron_cluster_codecs/TimerEvent.h"
-#include "util/BitUtil.h"
-#include "util/CloseHelper.h"
 #include "util/Exceptions.h"
 
 namespace aeron {
@@ -92,223 +85,6 @@ private:
   ClusterActionRequest m_clusterActionRequestDecoder;
   NewLeadershipTermEvent m_newLeadershipTermEventDecoder;
 };
-
-// Implementation
-inline LogAdapter::LogAdapter(ConsensusModuleAgent &consensusModuleAgent,
-                              std::int32_t fragmentLimit)
-    : m_fragmentLimit(fragmentLimit),
-      m_consensusModuleAgent(consensusModuleAgent) {}
-
-inline std::int64_t
-LogAdapter::disconnect(const exception_handler_t &errorHandler) {
-  std::int64_t registrationId = NULL_VALUE;
-
-  if (m_image) {
-    m_logPosition = m_image->position();
-    CloseHelper::close(errorHandler, m_subscription);
-    registrationId =
-        m_subscription ? m_subscription->registrationId() : NULL_VALUE;
-    m_image.reset();
-  }
-
-  return registrationId;
-}
-
-// Implementation moved to ConsensusModuleAgent.h to avoid circular dependency
-// inline void LogAdapter::disconnect(const exception_handler_t& errorHandler,
-// std::int64_t maxLogPosition)
-
-inline std::shared_ptr<Subscription> LogAdapter::subscription() const {
-  return m_subscription;
-}
-
-inline ConsensusModuleAgent &LogAdapter::consensusModuleAgent() const {
-  return m_consensusModuleAgent;
-}
-
-inline std::int64_t LogAdapter::position() const {
-  if (!m_image) {
-    return m_logPosition;
-  }
-
-  return m_image->position();
-}
-
-inline std::int32_t LogAdapter::poll(std::int64_t boundPosition) {
-  if (!m_image) {
-    return 0;
-  }
-
-  return m_image->boundedControlledPoll(*this, boundPosition, m_fragmentLimit);
-}
-
-inline bool LogAdapter::isImageClosed() const {
-  return !m_image || m_image->isClosed();
-}
-
-inline bool LogAdapter::isLogEndOfStream() const {
-  return m_image && m_image->isEndOfStream();
-}
-
-inline bool LogAdapter::isLogEndOfStreamAt(std::int64_t position) const {
-  return m_image && position == m_image->endOfStreamPosition();
-}
-
-inline std::shared_ptr<Image> LogAdapter::image() const { return m_image; }
-
-inline void LogAdapter::image(std::shared_ptr<Image> image) {
-  if (m_image) {
-    m_logPosition = m_image->position();
-  }
-
-  m_image = image;
-  // Note: In C++, Image doesn't expose subscription(), so we need to get it
-  // from elsewhere This will need to be set separately or retrieved from the
-  // ConsensusModuleAgent For now, we'll leave m_subscription as is and it
-  // should be set when image is set
-}
-
-inline void LogAdapter::asyncRemoveDestination(const std::string &destination) {
-  if (m_subscription && !m_subscription->isClosed()) {
-    m_subscription->removeDestination(destination);
-  }
-}
-
-inline ControlledPollAction LogAdapter::onFragment(AtomicBuffer &buffer,
-                                                   std::int32_t offset,
-                                                   std::int32_t length,
-                                                   Header &header) {
-  ControlledPollAction action = ControlledPollAction::CONTINUE;
-  const std::uint8_t flags = header.flags();
-
-  if ((flags & FrameDescriptor::UNFRAGMENTED) ==
-      FrameDescriptor::UNFRAGMENTED) {
-    action = onMessage(buffer, offset, length, header);
-  } else if ((flags & FrameDescriptor::BEGIN_FRAG) ==
-             FrameDescriptor::BEGIN_FRAG) {
-    m_builder.reset().captureHeader(header).append(buffer, offset, length);
-    m_builder.nextTermOffset(
-        BitUtil::align(offset + length + DataFrameHeader::LENGTH,
-                       FrameDescriptor::FRAME_ALIGNMENT));
-  } else if (offset == m_builder.nextTermOffset()) {
-    const std::uint32_t limit = m_builder.limit();
-
-    m_builder.append(buffer, offset, length);
-
-    if ((flags & FrameDescriptor::END_FRAG) == FrameDescriptor::END_FRAG) {
-      AtomicBuffer assembledBuffer(m_builder.buffer(), m_builder.limit());
-      action = onMessage(assembledBuffer, 0, m_builder.limit(), header);
-
-      if (ControlledPollAction::ABORT == action) {
-        m_builder.limit(limit);
-      } else {
-        m_builder.reset();
-      }
-    } else {
-      m_builder.nextTermOffset(
-          BitUtil::align(offset + length + DataFrameHeader::LENGTH,
-                         FrameDescriptor::FRAME_ALIGNMENT));
-    }
-  } else {
-    m_builder.reset();
-  }
-
-  return action;
-}
-
-inline ControlledPollAction LogAdapter::onMessage(AtomicBuffer &buffer,
-                                                  std::int32_t offset,
-                                                  std::int32_t length,
-                                                  Header &header) {
-  m_messageHeaderDecoder.wrap(buffer, offset);
-
-  const std::int32_t schemaId = m_messageHeaderDecoder.schemaId();
-  const std::int32_t templateId = m_messageHeaderDecoder.templateId();
-  const std::int32_t actingVersion = m_messageHeaderDecoder.version();
-  const std::int32_t actingBlockLength = m_messageHeaderDecoder.blockLength();
-
-  if (schemaId != MessageHeader::SCHEMA_ID) {
-    return m_consensusModuleAgent.onReplayExtensionMessage(
-        actingBlockLength, templateId, schemaId, actingVersion, buffer, offset,
-        length, header);
-  }
-
-  switch (templateId) {
-  case SessionMessageHeader::TEMPLATE_ID:
-    m_sessionHeaderDecoder.wrap(buffer, offset + MessageHeader::ENCODED_LENGTH,
-                                actingBlockLength, actingVersion);
-
-    m_consensusModuleAgent.onReplaySessionMessage(
-        m_sessionHeaderDecoder.clusterSessionId(),
-        m_sessionHeaderDecoder.timestamp());
-
-    return ControlledPollAction::CONTINUE;
-
-  case TimerEvent::TEMPLATE_ID:
-    m_timerEventDecoder.wrap(buffer, offset + MessageHeader::ENCODED_LENGTH,
-                             actingBlockLength, actingVersion);
-
-    m_consensusModuleAgent.onReplayTimerEvent(
-        m_timerEventDecoder.correlationId());
-    break;
-
-  case SessionOpenEvent::TEMPLATE_ID:
-    m_sessionOpenEventDecoder.wrap(buffer,
-                                   offset + MessageHeader::ENCODED_LENGTH,
-                                   actingBlockLength, actingVersion);
-
-    m_consensusModuleAgent.onReplaySessionOpen(
-        header.position(), m_sessionOpenEventDecoder.correlationId(),
-        m_sessionOpenEventDecoder.clusterSessionId(),
-        m_sessionOpenEventDecoder.timestamp(),
-        m_sessionOpenEventDecoder.responseStreamId(),
-        m_sessionOpenEventDecoder.responseChannel());
-    break;
-
-  case SessionCloseEvent::TEMPLATE_ID:
-    m_sessionCloseEventDecoder.wrap(buffer,
-                                    offset + MessageHeader::ENCODED_LENGTH,
-                                    actingBlockLength, actingVersion);
-
-    m_consensusModuleAgent.onReplaySessionClose(
-        m_sessionCloseEventDecoder.clusterSessionId(),
-        m_sessionCloseEventDecoder.closeReason());
-    break;
-
-  case ClusterActionRequest::TEMPLATE_ID:
-    m_clusterActionRequestDecoder.wrap(buffer,
-                                       offset + MessageHeader::ENCODED_LENGTH,
-                                       actingBlockLength, actingVersion);
-
-    const std::int32_t flags = (m_clusterActionRequestDecoder.flags() !=
-                                ClusterActionRequest::flagsNullValue())
-                                   ? m_clusterActionRequestDecoder.flags()
-                                   : 0; // CLUSTER_ACTION_FLAGS_DEFAULT = 0
-
-    m_consensusModuleAgent.onReplayClusterAction(
-        m_clusterActionRequestDecoder.leadershipTermId(),
-        m_clusterActionRequestDecoder.logPosition(),
-        m_clusterActionRequestDecoder.timestamp(),
-        m_clusterActionRequestDecoder.action(), flags);
-    return ControlledPollAction::BREAK;
-
-  case NewLeadershipTermEvent::TEMPLATE_ID:
-    m_newLeadershipTermEventDecoder.wrap(buffer,
-                                         offset + MessageHeader::ENCODED_LENGTH,
-                                         actingBlockLength, actingVersion);
-
-    m_consensusModuleAgent.onReplayNewLeadershipTermEvent(
-        m_newLeadershipTermEventDecoder.leadershipTermId(),
-        m_newLeadershipTermEventDecoder.logPosition(),
-        m_newLeadershipTermEventDecoder.timestamp(),
-        m_newLeadershipTermEventDecoder.termBaseLogPosition(),
-        ClusterClock::map(m_newLeadershipTermEventDecoder.timeUnit()),
-        m_newLeadershipTermEventDecoder.appVersion());
-    break;
-  }
-
-  return ControlledPollAction::CONTINUE;
-}
 
 } // namespace cluster
 } // namespace aeron
