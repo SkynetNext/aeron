@@ -440,10 +440,23 @@ inline RecordingLog::RecordingLog(const std::string &parentDir, bool createNew)
   bool isNewFile = !testFile.good();
   testFile.close();
 
+  // Java version: createNew only adds CREATE option, doesn't truncate existing
+  // file If file doesn't exist and createNew is false, FileChannel.open will
+  // throw
+  if (!isNewFile && !createNew) {
+    // File exists but createNew is false - this is OK, just open it
+  } else if (isNewFile && !createNew) {
+    // File doesn't exist and createNew is false - should throw exception
+    throw client::ClusterException(
+        "Recording log file does not exist: " + m_logFilePath, SOURCEINFO);
+  }
+
   std::ios_base::openmode mode =
       std::ios::in | std::ios::out | std::ios::binary;
-  if (createNew) {
-    mode |= std::ios::trunc;
+  // Note: Don't use trunc - Java version doesn't truncate existing files
+  // Only create if file doesn't exist
+  if (isNewFile) {
+    mode |= std::ios::trunc; // Create new file
   }
 
   m_fileStream.open(m_logFilePath, mode);
@@ -454,7 +467,9 @@ inline RecordingLog::RecordingLog(const std::string &parentDir, bool createNew)
 
   m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
 
-  if (isNewFile || createNew) {
+  // Java version: if isNewFile, syncDirectory, else reload
+  // Note: createNew only affects file creation, not whether to reload
+  if (isNewFile) {
     syncDirectory(parentDir);
   } else {
     reload();
@@ -586,7 +601,8 @@ inline void RecordingLog::reload() {
     return;
   }
 
-  m_fileStream.seekg(0, std::ios::beg);
+  // Java version: fileChannel.read(byteBuffer, filePosition) reads from
+  // filePosition C++ version: use seekg to position at filePosition, then read
   std::int64_t filePosition = 0;
   std::int64_t consumePosition = 0;
 
@@ -595,15 +611,18 @@ inline void RecordingLog::reload() {
   m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
 
   while (true) {
+    // Java version: fileChannel.read(byteBuffer, filePosition) reads from
+    // filePosition C++ version: seek to filePosition, then read
+    m_fileStream.seekg(filePosition, std::ios::beg);
     m_fileStream.read(reinterpret_cast<char *>(m_byteBuffer.data()),
                       MAX_ENTRY_LENGTH);
     const std::streamsize bytesRead = m_fileStream.gcount();
 
     if (bytesRead > 0) {
-      // In Java version, buffer always wraps the full byteBuffer
-      // (MAX_ENTRY_LENGTH capacity) but we use bytesRead as the limit for
-      // bounds checking in captureEntriesFromBuffer Pass bytesRead as the
-      // length limit, but m_buffer still has full capacity
+      // In Java version, byteBuffer.flip() sets limit to position, position to
+      // 0 Then captureEntriesFromBuffer uses byteBuffer.limit() as the length
+      // C++ version: pass bytesRead as the length limit, but m_buffer still has
+      // full capacity
       consumePosition += captureEntriesFromBuffer(
           consumePosition, static_cast<std::int32_t>(bytesRead), m_buffer,
           m_entriesCache);
