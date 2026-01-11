@@ -606,6 +606,8 @@ inline void RecordingLog::reload() {
   // filePosition byteBuffer.flip() sets limit to position, position to 0
   // byteBuffer.compact() moves remaining data to beginning
   // C++ version: simulate this behavior
+  // Clear any error flags and reset to beginning
+  m_fileStream.clear(); // Clear any error flags
   m_fileStream.seekg(0, std::ios::beg);
   std::int64_t filePosition = 0;
   std::int64_t consumePosition = 0;
@@ -620,23 +622,24 @@ inline void RecordingLog::reload() {
     // Java version: fileChannel.read(byteBuffer, filePosition) reads from
     // filePosition If there's remaining data from previous read, compact it
     // first
+    std::int32_t dataStart = 0;
     if (bufferOffset > 0) {
       // Move remaining data to beginning (like byteBuffer.compact())
+      // Remaining data is from bufferOffset to end of buffer
       const std::int32_t remaining = MAX_ENTRY_LENGTH - bufferOffset;
       std::memmove(m_byteBuffer.data(), m_byteBuffer.data() + bufferOffset,
                    static_cast<std::size_t>(remaining));
-      bufferOffset = 0;
+      dataStart = remaining;
     }
 
-    // Read new data
+    // Read new data after remaining data
     m_fileStream.seekg(filePosition, std::ios::beg);
-    const std::int32_t availableSpace = MAX_ENTRY_LENGTH - bufferOffset;
-    m_fileStream.read(
-        reinterpret_cast<char *>(m_byteBuffer.data() + bufferOffset),
-        availableSpace);
+    const std::int32_t availableSpace = MAX_ENTRY_LENGTH - dataStart;
+    m_fileStream.read(reinterpret_cast<char *>(m_byteBuffer.data() + dataStart),
+                      availableSpace);
     const std::streamsize bytesRead = m_fileStream.gcount();
     const std::int32_t totalBytes =
-        bufferOffset + static_cast<std::int32_t>(bytesRead);
+        dataStart + static_cast<std::int32_t>(bytesRead);
 
     if (totalBytes > 0) {
       // In Java version, byteBuffer.flip() sets limit to position, position to
@@ -648,7 +651,17 @@ inline void RecordingLog::reload() {
 
       // Calculate remaining unprocessed data
       // Remaining data starts at 'consumed' position in buffer
-      bufferOffset = consumed;
+      if (consumed < totalBytes) {
+        // Move remaining data to beginning for next iteration (like
+        // byteBuffer.compact())
+        const std::int32_t remaining = totalBytes - consumed;
+        std::memmove(m_byteBuffer.data(), m_byteBuffer.data() + consumed,
+                     static_cast<std::size_t>(remaining));
+        bufferOffset = MAX_ENTRY_LENGTH - remaining;
+      } else {
+        bufferOffset = 0;
+      }
+
       consumePosition += consumed;
       filePosition += bytesRead;
 
@@ -924,13 +937,17 @@ inline void RecordingLog::persistToStorage(std::int64_t entryPosition,
   m_fileStream.flush(); // Ensure data is written to disk
 
   // Java version: checks if length != fileChannel.write(...)
-  // C++ version: check if write was successful
-  if (static_cast<std::streamsize>(length) != m_fileStream.tellp() - position) {
+  // C++ version: verify write was successful
+  if (!m_fileStream.good()) {
     throw client::ClusterException("failed to write field atomically",
                                    SOURCEINFO);
   }
 
-  if (!m_fileStream.good()) {
+  // Verify bytes written
+  const std::streampos afterWrite = m_fileStream.tellp();
+  if (afterWrite == std::streampos(-1) ||
+      static_cast<std::streamsize>(length) !=
+          (afterWrite - std::streampos(position))) {
     throw client::ClusterException("failed to write field atomically",
                                    SOURCEINFO);
   }
@@ -1245,23 +1262,43 @@ inline void RecordingLog::addSnapshots(std::vector<Snapshot> &snapshots,
                                snapshot.logPosition, snapshot.timestamp,
                                snapshot.serviceId));
 
+  // Java version: inserts snapshots at specific indices (entry.serviceId + 1)
+  // C++ version: use insert to maintain order
   for (int i = 1; i <= serviceCount; i++) {
     if ((snapshotIndex - i) < 0) {
-      throw client::ClusterException("snapshot missing for service at index " +
-                                         std::to_string(i),
-                                     SOURCEINFO);
+      throw client::ClusterException(
+          "snapshot missing for service at index " + std::to_string(i) +
+              " in " + std::to_string(entries.size()) + " entries",
+          SOURCEINFO);
     }
 
     const Entry &entry = entries[snapshotIndex - i];
-    if (!isValidSnapshot(entry) || entry.serviceId != i) {
-      throw client::ClusterException("snapshot missing for service at index " +
-                                         std::to_string(i),
-                                     SOURCEINFO);
-    }
 
-    snapshots.push_back(Snapshot(entry.recordingId, entry.leadershipTermId,
-                                 entry.termBaseLogPosition, entry.logPosition,
-                                 entry.timestamp, entry.serviceId));
+    // Java version: checks ENTRY_TYPE_SNAPSHOT == entry.type &&
+    // entry.leadershipTermId == snapshot.leadershipTermId &&
+    // entry.logPosition == snapshot.logPosition
+    if (ENTRY_TYPE_SNAPSHOT == entry.type &&
+        entry.leadershipTermId == snapshot.leadershipTermId &&
+        entry.logPosition == snapshot.logPosition) {
+      // Java version: snapshots.add(entry.serviceId + 1, new Snapshot(...))
+      // C++ version: insert at position entry.serviceId + 1
+      const std::size_t insertPos =
+          static_cast<std::size_t>(entry.serviceId + 1);
+      // Ensure we have enough capacity
+      if (insertPos > snapshots.size()) {
+        snapshots.reserve(insertPos + 1);
+        // Fill with placeholder snapshots if needed (Java ArrayList.add grows
+        // automatically)
+        while (snapshots.size() < insertPos) {
+          snapshots.emplace_back(0, 0, 0, 0, 0,
+                                 -1); // Placeholder with invalid serviceId
+        }
+      }
+      snapshots.insert(snapshots.begin() + insertPos,
+                       Snapshot(entry.recordingId, entry.leadershipTermId,
+                                entry.termBaseLogPosition, entry.logPosition,
+                                entry.timestamp, entry.serviceId));
+    }
   }
 }
 
