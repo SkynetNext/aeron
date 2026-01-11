@@ -9,12 +9,20 @@
 #include "util/StringUtil.h"
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+
+#endif
 
 // Forward declaration to break circular dependency
 class ConsensusModuleAgent;
@@ -243,7 +251,7 @@ private:
                         std::int32_t length);
   void persistToStorage(const Entry &entry, AtomicBuffer &directBuffer);
   std::int32_t captureEntriesFromBuffer(std::int64_t filePosition,
-                                        std::vector<std::uint8_t> &byteBuffer,
+                                        std::int32_t length,
                                         AtomicBuffer &buffer,
                                         std::vector<Entry> &entries);
   static void syncDirectory(const std::string &dir);
@@ -552,12 +560,20 @@ inline void RecordingLog::validateTermRecordingId(std::int64_t recordingId) {
 }
 
 inline void RecordingLog::syncDirectory(const std::string &dir) {
-  // On Windows, directory sync is not easily available
-  // On Unix, we would call fsync on the directory file descriptor
-  // For now, we'll just ensure the directory exists
-  // Note: In a real implementation, use platform-specific directory creation
-  // APIs
-  (void)dir; // TODO: Implement directory creation/sync
+  // Java version: FileChannel.force(true) on directory
+  // On Linux: use fsync on directory file descriptor
+  // On Windows: directory sync is not easily available, ignore errors like Java
+  // version
+#ifdef _WIN32
+  (void)dir; // Windows doesn't support directory sync easily
+#else
+  // Linux/Unix: open directory and call fsync
+  int fd = open(dir.c_str(), O_RDONLY);
+  if (fd >= 0) {
+    fsync(fd); // Ignore errors like Java version
+    close(fd);
+  }
+#endif
 }
 
 inline void RecordingLog::reload() {
@@ -574,15 +590,24 @@ inline void RecordingLog::reload() {
   std::int64_t filePosition = 0;
   std::int64_t consumePosition = 0;
 
+  // Ensure m_buffer wraps the full m_byteBuffer (like Java version)
+  // m_buffer should always have MAX_ENTRY_LENGTH capacity
+  m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
+
   while (true) {
     m_fileStream.read(reinterpret_cast<char *>(m_byteBuffer.data()),
                       MAX_ENTRY_LENGTH);
     const std::streamsize bytesRead = m_fileStream.gcount();
 
     if (bytesRead > 0) {
-      m_buffer.wrap(m_byteBuffer.data(), static_cast<std::size_t>(bytesRead));
-      consumePosition += captureEntriesFromBuffer(consumePosition, m_byteBuffer,
-                                                  m_buffer, m_entriesCache);
+      // In Java version, buffer always wraps the full byteBuffer
+      // (MAX_ENTRY_LENGTH capacity) but we use bytesRead as the limit for
+      // bounds checking in captureEntriesFromBuffer Pass bytesRead as the
+      // length limit, but m_buffer still has full capacity
+      consumePosition += captureEntriesFromBuffer(
+          consumePosition, static_cast<std::int32_t>(bytesRead), m_buffer,
+          m_entriesCache);
+      filePosition += bytesRead;
     } else {
       break;
     }
@@ -740,6 +765,9 @@ inline void RecordingLog::appendStandbySnapshot(
 
 inline void RecordingLog::commitLogPosition(std::int64_t leadershipTermId,
                                             std::int64_t logPosition) {
+  // Ensure m_buffer has full capacity before writing
+  m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
+
   auto it = m_cacheIndexByLeadershipTermIdMap.find(leadershipTermId);
   if (it == m_cacheIndexByLeadershipTermIdMap.end()) {
     throw client::ClusterException("unknown leadershipTermId=" +
@@ -756,10 +784,9 @@ inline void RecordingLog::commitLogPosition(std::int64_t leadershipTermId,
 }
 
 inline std::int32_t RecordingLog::captureEntriesFromBuffer(
-    std::int64_t filePosition, std::vector<std::uint8_t> &byteBuffer,
-    AtomicBuffer &buffer, std::vector<Entry> &entries) {
+    std::int64_t filePosition, std::int32_t length, AtomicBuffer &buffer,
+    std::vector<Entry> &entries) {
   std::int32_t consumed = 0;
-  const std::int32_t length = static_cast<std::int32_t>(byteBuffer.size());
 
   while (consumed + ENDPOINT_OFFSET < length) {
     const std::int64_t position = filePosition + consumed;
@@ -778,11 +805,11 @@ inline std::int32_t RecordingLog::captureEntriesFromBuffer(
 
     std::string archiveEndpoint;
     if (ENTRY_TYPE_STANDBY_SNAPSHOT == type) {
-      const std::int32_t endpointLength = buffer.getInt32(endPointOffset);
-      if (endpointLength > 0 &&
-          endPointOffset + SIZE_OF_INT + endpointLength <= length) {
-        archiveEndpoint = buffer.getStringWithoutLength(
-            endPointOffset + SIZE_OF_INT, endpointLength);
+      // Java version: buffer.getStringAscii(endPointOffset) reads length prefix
+      // automatically C++ version: use getString() which reads length prefix,
+      // then string content
+      if (endPointOffset + SIZE_OF_INT <= length) {
+        archiveEndpoint = buffer.getString(endPointOffset);
       }
     }
 
@@ -825,12 +852,11 @@ inline void RecordingLog::writeEntryToBuffer(const Entry &entry,
   buffer.putInt32(ENTRY_TYPE_OFFSET, entryType);
 
   if (ENTRY_TYPE_STANDBY_SNAPSHOT == entry.type) {
-    const std::int32_t endpointLength =
-        static_cast<std::int32_t>(entry.archiveEndpoint.length());
-    buffer.putInt32(ENDPOINT_OFFSET, endpointLength);
-    if (endpointLength > 0) {
-      buffer.putStringWithoutLength(ENDPOINT_OFFSET + SIZE_OF_INT,
-                                    entry.archiveEndpoint);
+    // Java version: buffer.putStringAscii(ENDPOINT_OFFSET,
+    // entry.archiveEndpoint) C++ version: use putString() which writes length
+    // prefix and string content
+    if (!entry.archiveEndpoint.empty()) {
+      buffer.putString(ENDPOINT_OFFSET, entry.archiveEndpoint);
     }
   }
 }
@@ -886,6 +912,9 @@ RecordingLog::append(std::int32_t entryType, std::int64_t recordingId,
                      std::int64_t termBaseLogPosition, std::int64_t logPosition,
                      std::int64_t timestamp, std::int32_t serviceId,
                      const std::string &endpoint) {
+  // Ensure m_buffer has full capacity before writing
+  m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
+
   Entry entry(recordingId, leadershipTermId, termBaseLogPosition, logPosition,
               timestamp, serviceId, entryType, endpoint, true,
               aeron::NULL_VALUE, m_nextEntryIndex);
@@ -940,24 +969,31 @@ inline bool RecordingLog::restoreInvalidSnapshot(
     std::int32_t snapshotEntryType, std::int64_t recordingId,
     std::int64_t leadershipTermId, std::int64_t termBaseLogPosition,
     std::int64_t logPosition, std::int64_t timestamp, std::int32_t serviceId) {
+  // Ensure m_buffer has full capacity before writing
+  m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
+
   for (int i = static_cast<int>(m_invalidSnapshots.size()) - 1; i >= 0; i--) {
     const std::int32_t entryCacheIndex = m_invalidSnapshots[i];
     Entry &entry = m_entriesCache[entryCacheIndex];
 
-    if (matchesEntry(entry, leadershipTermId, termBaseLogPosition, logPosition,
+    // Java version: matchesEntry checks snapshotEntryType == entry.type first
+    // but also checks matchesEntry(entry, ...) separately
+    if (snapshotEntryType == entry.type &&
+        matchesEntry(entry, leadershipTermId, termBaseLogPosition, logPosition,
                      serviceId) &&
-        snapshotEntryType == entry.type && !entry.isValid) {
-      Entry validatedEntry = entry;
-      validatedEntry.recordingId = recordingId;
-      validatedEntry.timestamp = timestamp;
-      validatedEntry.isValid = true;
+        !entry.isValid) {
+      // Java version: creates new Entry with entry.position (not NULL_VALUE)
+      Entry validatedEntry(recordingId, leadershipTermId, termBaseLogPosition,
+                           logPosition, timestamp, serviceId, snapshotEntryType,
+                           "", true, entry.position, entry.entryIndex);
 
       writeEntryToBuffer(validatedEntry, m_buffer);
-      persistToStorage(validatedEntry, m_buffer);
+      persistToStorage(entry,
+                       m_buffer); // Java version uses entry, not validatedEntry
 
-      entry = validatedEntry;
+      m_entriesCache[entryCacheIndex] = validatedEntry;
 
-      // Remove from invalid snapshots
+      // Remove from invalid snapshots (Java version uses fastUnorderedRemove)
       m_invalidSnapshots.erase(m_invalidSnapshots.begin() + i);
 
       return true;
