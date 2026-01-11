@@ -568,10 +568,10 @@ inline void RecordingLog::syncDirectory(const std::string &dir) {
   (void)dir; // Windows doesn't support directory sync easily
 #else
   // Linux/Unix: open directory and call fsync
-  int fd = open(dir.c_str(), O_RDONLY);
+  int fd = ::open(dir.c_str(), O_RDONLY);
   if (fd >= 0) {
-    fsync(fd); // Ignore errors like Java version
-    close(fd);
+    ::fsync(fd); // Ignore errors like Java version
+    ::close(fd); // Use global close() function, not RecordingLog::close()
   }
 #endif
 }
