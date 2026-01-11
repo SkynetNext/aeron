@@ -434,7 +434,7 @@ inline RecordingLog::RecordingLog(const std::string &parentDir, bool createNew)
 
   std::ios_base::openmode mode =
       std::ios::in | std::ios::out | std::ios::binary;
-  if (createNew || isNewFile) {
+  if (createNew) {
     mode |= std::ios::trunc;
   }
 
@@ -446,7 +446,7 @@ inline RecordingLog::RecordingLog(const std::string &parentDir, bool createNew)
 
   m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
 
-  if (isNewFile) {
+  if (isNewFile || createNew) {
     syncDirectory(parentDir);
   } else {
     reload();
@@ -457,6 +457,7 @@ inline RecordingLog::~RecordingLog() { close(); }
 
 inline void RecordingLog::close() {
   if (m_fileStream.is_open()) {
+    m_fileStream.flush();
     m_fileStream.close();
   }
 }

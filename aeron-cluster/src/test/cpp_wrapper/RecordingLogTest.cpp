@@ -60,8 +60,8 @@ TEST_F(RecordingLogTest, shouldCreateNewIndex) {
 
 TEST_F(RecordingLogTest, shouldAppendAndThenReloadLatestSnapshot) {
   const RecordingLog::Entry expectedEntry(1, 3, 2, 777, 4, aeron::NULL_VALUE,
-                                          RecordingLog::ENTRY_TYPE_SNAPSHOT,
-                                          nullptr, true, 0);
+                                          RecordingLog::ENTRY_TYPE_SNAPSHOT, "",
+                                          true, 0);
 
   {
     RecordingLog recordingLog(m_tempDir.string(), true);
@@ -72,7 +72,7 @@ TEST_F(RecordingLogTest, shouldAppendAndThenReloadLatestSnapshot) {
   }
 
   {
-    RecordingLog recordingLog(m_tempDir.string(), true);
+    RecordingLog recordingLog(m_tempDir.string(), false);
     EXPECT_EQ(1, recordingLog.entries().size());
 
     RecordingLog::Entry *snapshot = recordingLog.getLatestSnapshot(SERVICE_ID);
