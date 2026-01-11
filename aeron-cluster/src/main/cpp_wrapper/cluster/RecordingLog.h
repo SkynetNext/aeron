@@ -520,7 +520,7 @@ inline std::string RecordingLog::typeAsString(std::int32_t type) {
   case ENTRY_TYPE_STANDBY_SNAPSHOT:
     return "STANDBY_SNAPSHOT";
   default:
-    return "UNKNOWN(" + std::to_string(cleanType) + ")";
+    return "UNKNOWN";
   }
 }
 
@@ -556,9 +556,10 @@ inline bool RecordingLog::matchesEntry(const Entry &entry,
 }
 
 inline void RecordingLog::validateRecordingId(std::int64_t recordingId) {
-  if (recordingId < 0) {
+  // Java version: only checks for NULL_VALUE, not >= 0
+  if (aeron::NULL_VALUE == recordingId) {
     throw client::ClusterException(
-        "recordingId must be >= 0: " + std::to_string(recordingId), SOURCEINFO);
+        "invalid recordingId=" + std::to_string(recordingId), SOURCEINFO);
   }
 }
 
@@ -887,10 +888,12 @@ inline void RecordingLog::persistToStorage(std::int64_t entryPosition,
     throw client::ClusterException("File stream is not open", SOURCEINFO);
   }
 
+  // Java version: byteBuffer.limit(length).position(0) means write first
+  // 'length' bytes m_buffer.putInt64(0, logPosition) already wrote to offset 0
   const std::int64_t position = entryPosition + offset;
   m_fileStream.seekp(position);
-  m_fileStream.write(reinterpret_cast<const char *>(m_buffer.buffer() + offset),
-                     length);
+  m_fileStream.write(reinterpret_cast<const char *>(m_buffer.buffer()), length);
+  m_fileStream.flush(); // Ensure data is written to disk
 
   if (!m_fileStream.good()) {
     throw client::ClusterException("failed to write field atomically",
@@ -1112,6 +1115,9 @@ RecordingLog::getTermTimestamp(std::int64_t leadershipTermId) const {
 }
 
 inline void RecordingLog::invalidateEntry(std::int32_t index) {
+  // Ensure m_buffer has full capacity before writing
+  m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
+
   if (index < 0 || index >= static_cast<std::int32_t>(m_entriesCache.size())) {
     throw client::ClusterException(
         "invalid entry index: " + std::to_string(index), SOURCEINFO);
@@ -1135,6 +1141,9 @@ inline void RecordingLog::invalidateEntry(std::int32_t index) {
 
 inline void RecordingLog::removeEntry(std::int64_t leadershipTermId,
                                       std::int32_t entryIndex) {
+  // Ensure m_buffer has full capacity before writing
+  m_buffer.wrap(m_byteBuffer.data(), m_byteBuffer.size());
+
   Entry *entryToRemove = nullptr;
   std::size_t removeIndex = 0;
 
