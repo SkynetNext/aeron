@@ -258,7 +258,8 @@ TEST_F(RecordingLogTest, shouldInvalidateLatestSnapshot) {
 
     EXPECT_FALSE(recordingLog.invalidateLatestSnapshot());
     const auto &entries = recordingLog.entries();
-    const auto termEntry = recordingLog.getTermEntry(leadershipTermId);
+    RecordingLog::Entry *termEntry =
+        recordingLog.findTermEntry(leadershipTermId);
     EXPECT_NE(nullptr, termEntry);
     EXPECT_EQ(&entries[5], termEntry);
   }
