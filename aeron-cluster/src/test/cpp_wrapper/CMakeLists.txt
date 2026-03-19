@@ -107,5 +107,6 @@ if (AERON_UNIT_TESTS)
     aeron_cluster_wrapper_test(egressAdapterTest EgressAdapterTest.cpp)
     aeron_cluster_wrapper_test(aeronClusterAsyncConnectTest AeronClusterAsyncConnectTest.cpp)
     aeron_cluster_wrapper_test(recordingLogTest RecordingLogTest.cpp)
+    aeron_cluster_wrapper_test(clusterClientSmokeTest ClusterClientSmokeTest.cpp)
 endif ()
 
