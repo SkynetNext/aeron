@@ -781,6 +781,12 @@ private:
     ControlledFragmentAssembler m_controlledFragmentAssembler;
     std::shared_ptr<ControlledEgressListener> m_controlledEgressListener;
     std::unordered_map<int, std::unique_ptr<MemberIngress>> m_endpointByIdMap;
+
+    // Injectable overrides for testing (accessed via friend class AeronClusterTestFixture)
+    std::function<std::int64_t(std::int32_t, BufferClaim &)> m_publicationTryClaim;
+    std::function<std::int32_t(const fragment_handler_t &, int)> m_subscriptionPoll;
+    std::function<bool()> m_egressImageIsClosed;
+    std::function<std::shared_ptr<Publication>(const std::string &, std::int32_t)> m_addPublicationFn;
 };
 
 }}}
@@ -1145,12 +1151,7 @@ void AeronCluster::Context::conclude()
         throw ConfigurationException(
             "egressListener must be specified on AeronCluster.Context", SOURCEINFO);
     }
-
-    if (!m_controlledEgressListener)
-    {
-        throw ConfigurationException(
-            "controlledEgressListener must be specified on AeronCluster.Context", SOURCEINFO);
-    }
+    // controlledEgressListener is optional; onNewLeader and fragment handlers guard against nullptr
 }
 
 inline void AeronCluster::Context::close()
@@ -1778,6 +1779,23 @@ inline AeronCluster::AeronCluster(
         .wrapAndApplyHeader(reinterpret_cast<char *>(m_headerBuffer.buffer()), 0, m_headerBuffer.capacity())
         .clusterSessionId(clusterSessionId)
         .leadershipTermId(leadershipTermId);
+
+    m_publicationTryClaim = [this](std::int32_t len, BufferClaim &bc) -> std::int64_t
+    {
+        return m_publication ? m_publication->tryClaim(len, bc) : PUBLICATION_CLOSED;
+    };
+    m_subscriptionPoll = [this](const fragment_handler_t &h, int limit) -> std::int32_t
+    {
+        return m_subscription ? m_subscription->poll(h, limit) : 0;
+    };
+    m_egressImageIsClosed = [this]() -> bool
+    {
+        return m_egressImage && m_egressImage->isClosed();
+    };
+    m_addPublicationFn = [this](const std::string &ch, std::int32_t sid) -> std::shared_ptr<Publication>
+    {
+        return addIngressPublication(m_ctx, ch, sid);
+    };
 }
 
 // AeronCluster public methods
@@ -1813,7 +1831,7 @@ inline std::shared_ptr<Subscription> AeronCluster::egressSubscription() const
 
 inline std::int64_t AeronCluster::tryClaim(std::int32_t length, BufferClaim& bufferClaim)
 {
-    const std::int64_t position = m_publication->tryClaim(length + SESSION_HEADER_LENGTH, bufferClaim);
+    const std::int64_t position = m_publicationTryClaim(length + SESSION_HEADER_LENGTH, bufferClaim);
     if (position > 0)
     {
         bufferClaim.buffer().putBytes(bufferClaim.offset(), m_headerBuffer, 0, SESSION_HEADER_LENGTH);
@@ -1828,7 +1846,7 @@ inline std::int64_t AeronCluster::offer(AtomicBuffer& buffer, std::int32_t offse
 {
     // Use tryClaim to write header + message
     BufferClaim headerClaim;
-    const std::int64_t position = m_publication->tryClaim(SESSION_HEADER_LENGTH + length, headerClaim);
+    const std::int64_t position = m_publicationTryClaim(SESSION_HEADER_LENGTH + length, headerClaim);
     if (position > 0)
     {
         // Write header
@@ -1847,7 +1865,7 @@ inline bool AeronCluster::sendKeepAlive()
 {
     const std::int32_t length = MessageHeaderEncoder::encodedLength() + SessionKeepAlive::SBE_BLOCK_LENGTH;
 
-    std::int64_t result = m_publication->tryClaim(length, m_bufferClaim);
+    std::int64_t result = m_publicationTryClaim(length, m_bufferClaim);
     if (result > 0)
     {
         SessionKeepAlive sessionKeepAliveEncoder;
@@ -1871,7 +1889,7 @@ inline bool AeronCluster::sendAdminRequestToTakeASnapshot(std::int64_t correlati
         AdminRequest::SBE_BLOCK_LENGTH +
         AdminRequest::payloadHeaderLength();
 
-    std::int64_t result = m_publication->tryClaim(length, m_bufferClaim);
+    std::int64_t result = m_publicationTryClaim(length, m_bufferClaim);
     if (result > 0)
     {
         m_adminRequestEncoder
@@ -1894,9 +1912,9 @@ inline bool AeronCluster::sendAdminRequestToTakeASnapshot(std::int64_t correlati
 
 inline std::int32_t AeronCluster::pollEgress()
 {
-    int workCount = m_subscription->poll(m_fragmentAssembler.handler(), FRAGMENT_LIMIT);
+    int workCount = m_subscriptionPoll(m_fragmentAssembler.handler(), FRAGMENT_LIMIT);
 
-    if (m_egressImage && m_egressImage->isClosed() && 
+    if (m_egressImageIsClosed() &&
         (State::CONNECTED == m_state || State::AWAIT_NEW_LEADER_CONNECTION == m_state))
     {
         onDisconnected();
@@ -1910,9 +1928,9 @@ inline std::int32_t AeronCluster::pollEgress()
 
 inline std::int32_t AeronCluster::controlledPollEgress()
 {
-    int workCount = m_subscription->controlledPoll(m_controlledFragmentAssembler.handler(), FRAGMENT_LIMIT);
+    int workCount = m_subscription ? m_subscription->controlledPoll(m_controlledFragmentAssembler.handler(), FRAGMENT_LIMIT) : 0;
 
-    if (m_egressImage && m_egressImage->isClosed() &&
+    if (m_egressImageIsClosed() &&
         (State::CONNECTED == m_state || State::AWAIT_NEW_LEADER_CONNECTION == m_state))
     {
         onDisconnected();
@@ -1947,7 +1965,11 @@ inline void AeronCluster::trackIngressPublicationResult(std::int64_t result)
         }
         else if (aeron::MAX_POSITION_EXCEEDED == result)
         {
-            m_publication.reset();
+            if (m_publication)
+            {
+                m_publication->close();
+                m_publication.reset();
+            }
             state(State::PENDING_CLOSE, 0);
         }
     }
@@ -2013,14 +2035,16 @@ inline void AeronCluster::onNewLeader(
     m_leaderMemberId = leaderMemberId;
     m_sessionMessageHeaderEncoder.leadershipTermId(leadershipTermId);
 
+    // Close old publication (matches Java CloseHelper.close(publication))
     if (m_publication)
     {
-        m_publication.reset();
+        m_publication->close();
     }
+    m_publication.reset();
 
     if (m_ctx->ingressEndpoints().empty())
     {
-        m_publication = addIngressPublication(m_ctx, m_ctx->ingressChannel(), m_ctx->ingressStreamId());
+        m_publication = m_addPublicationFn(m_ctx->ingressChannel(), m_ctx->ingressStreamId());
     }
     else
     {
@@ -2028,12 +2052,11 @@ inline void AeronCluster::onNewLeader(
         updateMemberEndpoints(ingressEndpoints, leaderMemberId);
     }
 
-    // Clear fragment assemblers
-    // Note: FragmentAssembler/ControlledFragmentAssembler don't have clear() in C++ version
-    // They automatically reset on new fragments
-
     m_egressListener->onNewLeader(clusterSessionId, leadershipTermId, leaderMemberId, ingressEndpoints);
-    m_controlledEgressListener->onNewLeader(clusterSessionId, leadershipTermId, leaderMemberId, ingressEndpoints);
+    if (m_controlledEgressListener)
+    {
+        m_controlledEgressListener->onNewLeader(clusterSessionId, leadershipTermId, leaderMemberId, ingressEndpoints);
+    }
 }
 
 // Private helper methods
@@ -2045,9 +2068,11 @@ inline void AeronCluster::state(State newState, std::int64_t newStateDeadline)
 
 inline void AeronCluster::onDisconnected()
 {
+    // Close the publication resource but keep the reference (matches Java semantics).
+    // onNewLeader() will close it again via CloseHelper.close() equivalent and replace it.
     if (m_publication)
     {
-        m_publication.reset();
+        m_publication->close();
     }
     state(State::AWAIT_NEW_LEADER, m_nanoClock() + m_ctx->newLeaderTimeoutNs());
 }
@@ -2055,10 +2080,10 @@ inline void AeronCluster::onDisconnected()
 inline void AeronCluster::closeSession()
 {
     const std::int32_t length = MessageHeaderEncoder::encodedLength() + SessionCloseRequest::SBE_BLOCK_LENGTH;
-    
+
     for (int i = 0; i < SEND_ATTEMPTS; i++)
     {
-        std::int64_t result = m_publication->tryClaim(length, m_bufferClaim);
+        std::int64_t result = m_publicationTryClaim(length, m_bufferClaim);
         if (result > 0)
         {
             SessionCloseRequest sessionCloseRequestEncoder;
@@ -2090,7 +2115,7 @@ inline void AeronCluster::updateMemberEndpoints(const std::string& ingressEndpoi
         {
             channelUri->put(aeron::ENDPOINT_PARAM_NAME, newLeader->m_endpoint);
         }
-        m_publication = newLeader->m_publication = addIngressPublication(m_ctx, channelUri->toString(), m_ctx->ingressStreamId());
+        m_publication = newLeader->m_publication = m_addPublicationFn(channelUri->toString(), m_ctx->ingressStreamId());
     }
     m_endpointByIdMap = std::move(map);
 }
@@ -2106,10 +2131,10 @@ inline void AeronCluster::onFragment(AtomicBuffer& buffer, std::int32_t offset, 
     const std::int32_t schemaId = m_messageHeaderDecoder.schemaId();
     const std::int32_t templateId = m_messageHeaderDecoder.templateId();
 
-    if (schemaId != MessageHeader::sbeSchemaId())
+    if (schemaId != SessionMessageHeader::sbeSchemaId())
     {
         throw ClusterException(
-            "expected cluster egress schemaId=" + std::to_string(MessageHeader::sbeSchemaId()) + 
+            "expected cluster egress schemaId=" + std::to_string(SessionMessageHeader::sbeSchemaId()) +
             " actual=" + std::to_string(schemaId), SOURCEINFO);
     }
 
@@ -2246,10 +2271,10 @@ inline ControlledPollAction AeronCluster::onControlledFragment(
     const std::int32_t schemaId = m_messageHeaderDecoder.schemaId();
     const std::int32_t templateId = m_messageHeaderDecoder.templateId();
 
-    if (schemaId != MessageHeader::sbeSchemaId())
+    if (schemaId != SessionMessageHeader::sbeSchemaId())
     {
         throw ClusterException(
-            "expected cluster egress schemaId=" + std::to_string(MessageHeader::sbeSchemaId()) + 
+            "expected cluster egress schemaId=" + std::to_string(SessionMessageHeader::sbeSchemaId()) +
             " actual=" + std::to_string(schemaId), SOURCEINFO);
     }
 

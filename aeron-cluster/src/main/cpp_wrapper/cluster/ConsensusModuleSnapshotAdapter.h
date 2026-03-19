@@ -92,11 +92,11 @@ inline ControlledPollAction ConsensusModuleSnapshotAdapter::onFragment(
 {
     m_messageHeaderDecoder.wrap(buffer, offset);
 
-    const std::int32_t schemaId = m_messageHeaderDecoder.sbeSchemaId();
-    if (MessageHeader::sbeSchemaId() != schemaId)
+    const std::int32_t schemaId = m_messageHeaderDecoder.schemaId();
+    if (codecs::SessionMessageHeader::sbeSchemaId() != schemaId)
     {
         throw ClusterException(
-            "expected schemaId=" + std::to_string(MessageHeader::sbeSchemaId()) +
+            "expected schemaId=" + std::to_string(codecs::SessionMessageHeader::sbeSchemaId()) +
             ", actual=" + std::to_string(schemaId),
             SOURCEINFO);
     }

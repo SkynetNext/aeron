@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 #include "security/AuthorisationService.h"
-#include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
 #include "generated/aeron_cluster_codecs/BackupQuery.h"
 #include "generated/aeron_cluster_codecs/HeartbeatRequest.h"
 #include "generated/aeron_cluster_codecs/StandbySnapshot.h"
@@ -39,9 +39,7 @@ inline bool AllowBackupAndStandbyAuthorisationService::isAuthorised(
     const void* type,
     const std::vector<std::uint8_t>& encodedPrincipal)
 {
-    // Java: MessageHeaderDecoder.SCHEMA_ID == protocolId
-    // C++: MessageHeader::sbeSchemaId()
-    return MessageHeader::sbeSchemaId() == protocolId &&
+    return SessionMessageHeader::sbeSchemaId() == protocolId &&
         (BackupQuery::sbeTemplateId() == actionId ||
          HeartbeatRequest::sbeTemplateId() == actionId ||
          StandbySnapshot::sbeTemplateId() == actionId);

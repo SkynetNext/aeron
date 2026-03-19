@@ -10,6 +10,7 @@
 #include "concurrent/AtomicBuffer.h"
 #include "util/CloseHelper.h"
 #include "generated/aeron_cluster_codecs/MessageHeader.h"
+#include "generated/aeron_cluster_codecs/SessionMessageHeader.h"
 #include "generated/aeron_cluster_codecs/ClusterMembersResponse.h"
 #include "generated/aeron_cluster_codecs/ClusterMembersExtendedResponse.h"
 
@@ -108,10 +109,10 @@ inline void ClusterControlAdapter::onFragment(
     m_messageHeaderDecoder.wrap(buffer, offset);
 
     const std::int32_t schemaId = m_messageHeaderDecoder.schemaId();
-    if (schemaId != MessageHeader::sbeSchemaId())
+    if (schemaId != SessionMessageHeader::sbeSchemaId())
     {
         throw ClusterException(
-            "expected schemaId=" + std::to_string(MessageHeader::sbeSchemaId()) +
+            "expected schemaId=" + std::to_string(SessionMessageHeader::sbeSchemaId()) +
             ", actual=" + std::to_string(schemaId), SOURCEINFO);
     }
 
