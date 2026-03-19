@@ -27,6 +27,8 @@ bin/
 *.sublime-workspace
 *~
 .cache
+.vscode/
+.claude/
 
 # the build
 build-local.properties
